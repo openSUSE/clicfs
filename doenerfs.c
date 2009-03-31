@@ -1,37 +1,22 @@
 #define FUSE_USE_VERSION  26
-   
+
+#include "doenerfs.h"   
 #include <fuse.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <lzma.h>
-#include <limits.h>
 #include <assert.h>
-#include <stdlib.h>
 #include <sys/types.h>
+#include <stdlib.h>
 #include <pthread.h>
 
 FILE *logger = 0;
 
-static char thefile[PATH_MAX];
-static size_t thefilesize = 0;
-static uint64_t *sizes = 0;
-static uint64_t *offs = 0;
 static int *hits = 0;
 static int hit_counter = 0;
-static uint32_t parts = 0;
-static uint32_t pindex = 0;
 static uint32_t wparts = 0;
-static int preset = 0;
-FILE *packfile = 0;
-
-struct block {
-    uint32_t orig;
-    uint32_t mapped;
-};
-
-static struct block *blocks;
 
 static size_t detached_allocated = 0;
 static size_t sparse_memory = 0;
@@ -89,8 +74,6 @@ static int doener_open(const char *path, struct fuse_file_info *fi)
     return 0;
 }
 
-size_t bsize = 0;
-
 struct buffer_combo {
     unsigned char *in_buffer;
     unsigned char *out_buffer;
@@ -110,40 +93,6 @@ static unsigned int com_count = 1;
 pthread_mutex_t picker = PTHREAD_MUTEX_INITIALIZER, seeker = PTHREAD_MUTEX_INITIALIZER;;
 
 FILE *pack;
-
-
-/* qsort int comparison function */
-int block_cmp(const void *a, const void *b)
-{
-    const struct block *ba = (const struct block *)a; // casting pointer types
-    const struct block *bb = (const struct block *)b;
-    return ba->orig  - bb->orig; 
-}
-
-/* slightly modified binary_search.
-   If target is not found, return the index of the value that's
-   in the array before it
-*/
-int binary_search(struct block *A, int size, uint32_t target)
-{
-    int lo = 0, hi = size-1;
-    if (target > A[hi].orig)
-	return hi;
-    while (lo <= hi) {
-	int mid = lo + (hi-lo)/2;
-	if (A[mid].orig == target)
-	    return mid;
-	else { 
-	    if (A[mid].orig < target) 
-		lo = mid+1;
-	    else
-		hi = mid-1;
-	}
-    }
-    
-    return hi;
-}
-
 
 static off_t doener_map_block(off_t block)
 {
@@ -463,15 +412,6 @@ int doener_opt_proc(void *data, const char *arg, int key, struct fuse_args *outa
     return 1;
 }
 
-static uint32_t readindex()
-{
-    uint32_t stringlen;
-    if (fread((char*)&stringlen, sizeof(uint32_t), 1, packfile) != 1) {
-        return 0;
-    }
-    return stringlen;
-}
-
 int main(int argc, char *argv[])
 {
     logger = fopen("/dev/shm/doenerfs.log", "w");
@@ -485,76 +425,25 @@ int main(int argc, char *argv[])
 
     // not sure why but multiple threads make it slower
     fuse_opt_add_arg(&args, "-s");
-    
-    if (!packfilename) {
-	fprintf(stderr, "usage: [-m <mb] <packfile> <mntpoint>\n");
-        return 1;
-    }
-    packfile = fopen(packfilename, "r");
-    if (!packfile) {
-        fprintf(stderr, "packfile %s can't be opened\n", packfilename);
-        return 1;
-    }
-    fseek(packfile, 2, SEEK_SET);
 
-    uint32_t stringlen = readindex();
-    if (stringlen == 0) {
-	fprintf(stderr, "abnormal len 0\n"); 
-        return 1;
-    }
-    if (fread(thefile, 1, stringlen, packfile) != stringlen) {
-	fprintf(stderr, "short read\n");
-	return 1;
-    }
-    thefile[stringlen] = 0;
-
-    parts = readindex();
-    bsize = readindex();
-    thefilesize = readindex();
-    preset = readindex();
-    pindex = readindex();
-    blocks = malloc(sizeof(struct block)*pindex);
-
-    uint32_t i;
-    for (i = 0; i < pindex; ++i) {
-	blocks[i].mapped = i;
-	blocks[i].orig = readindex();
-    }
-
-    qsort(blocks, pindex, sizeof(struct block), block_cmp);
-
-    //fprintf(stderr, "file %ld %ld %ld %d\n", thefilesize, sparse_memory, bsize, parts);
+    if (doenerfs_read_pack(packfilename))
+      return 1;
 
     // fake for write
     thefilesize += sparse_memory * 1024 * 1024;
 
-    sizes = malloc(sizeof(uint64_t)*parts);
-    offs = malloc(sizeof(uint64_t)*parts);
-    hits = malloc(sizeof(int)*parts);
-
     wparts = thefilesize / bsize + 1;
     detached = malloc(sizeof(unsigned char*) * wparts);
-
-    for (i = 0; i < parts; ++i)
-    {
-	if (fread((char*)(sizes + i), sizeof(uint64_t), 1, packfile) != 1)
-		parts = 0;
-	if (!sizes[i]) {
-		fprintf(stderr, "unreasonable size 0 for part %d\n", i);
-		return 1;
-        }
-	if (fread((char*)(offs + i), sizeof(uint64_t), 1, packfile) != 1)
-		parts = 0;
-        hits[i] = 0;
-    }
-    if (parts == 0) {
-        fprintf(stderr, "unreasonable part number 0\n");
-	return 1;
-    }
-
+    uint32_t i;
     for (i = 0; i < wparts; ++i)
     {
 	detached[i] = 0;
+    }
+
+    hits = malloc(sizeof(int)*parts);
+    for (i = 0; i < parts; ++i)
+    {
+        hits[i] = 0;
     }
     
     com_count = 6000000 / bsize; // get 6MB of cache
