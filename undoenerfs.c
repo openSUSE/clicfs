@@ -48,7 +48,6 @@ int main(int argc, char *argv[])
     {
       size_t diff = doener_read_block(tbuf, i);
       assert(diff == 4096);
-      fprintf(stderr, "diff %ld/%ld\n", i, bcount);
       fwrite(tbuf, 1, 4096, outfile);
     }
 
