@@ -1,6 +1,7 @@
 #include "doenerfs.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <lzma.h>
 
 int preset = 0;
 FILE *packfile = 0;
@@ -85,4 +86,56 @@ int doenerfs_read_pack(const char *packfilename)
 
 
     return 0;
+}
+
+off_t doener_map_block(off_t block)
+{
+    int ret = binary_search(blocks, pindex, block);
+    
+    if (blocks[ret].orig == block) { // in index
+	return blocks[ret].mapped;
+    } else {
+	// now the tricky part. If it's not in the index, it's
+	// after the indexed blocks - the missing blocks
+	return block - ret + pindex - 1;
+    }
+}
+
+size_t doener_readpart(unsigned char *buffer, int part)
+{
+    if (fseek(packfile, offs[part], SEEK_SET)) {
+	fprintf(stderr, "seek failed\n");
+	return 0;
+    }
+#if defined(DEBUG)
+    fprintf(logger, "uncompress part=%d/%d com=%d off=%ld size=%ld ioff=%ld size=%ld\n", part, parts, com->index, offs[part], sizes[part], ioff, size );
+#endif
+    size_t readin = fread(buffer, 1, sizes[part], packfile);
+    if (readin != sizes[part]) {
+	fprintf(stderr, "short read: %d %ld %ld %ld\n", part, offs[part], sizes[part], readin);
+    }
+    return readin;
+}
+
+void doener_decompress_part(unsigned char *out, const unsigned char *in, size_t readin)
+{
+    const uint32_t flags = LZMA_TELL_UNSUPPORTED_CHECK | LZMA_CONCATENATED;
+    lzma_stream strm = LZMA_STREAM_INIT;
+
+    lzma_ret ret = lzma_auto_decoder(&strm, lzma_easy_decoder_memusage(preset), flags); 
+
+    strm.next_in = in;
+    strm.avail_in = readin;
+    strm.next_out = out;
+    strm.avail_out = bsize;
+
+    while (1) {
+	ret = lzma_code(&strm, LZMA_RUN);
+//	fprintf(logger, "ret %d\n", ret);
+	if (ret != LZMA_OK)
+	    break;
+    }
+
+    //assert (ret == LZMA_OK);
+    lzma_end(&strm);
 }

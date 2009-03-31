@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <limits.h>
+#include <sys/types.h>
 
 extern int preset;
 extern FILE *packfile;
@@ -52,3 +53,6 @@ static inline int binary_search(struct block *A, int size, uint32_t target)
 }
 
 extern int doenerfs_read_pack(const char *packfilename);
+extern void doener_decompress_part(unsigned char *out, const unsigned char *in, size_t size);
+extern size_t doener_readpart(unsigned char *buffer, int part);
+extern off_t doener_map_block(off_t block);

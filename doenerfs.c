@@ -6,9 +6,7 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <lzma.h>
 #include <assert.h>
-#include <sys/types.h>
 #include <stdlib.h>
 #include <pthread.h>
 
@@ -93,19 +91,6 @@ static unsigned int com_count = 1;
 pthread_mutex_t picker = PTHREAD_MUTEX_INITIALIZER, seeker = PTHREAD_MUTEX_INITIALIZER;;
 
 FILE *pack;
-
-static off_t doener_map_block(off_t block)
-{
-    int ret = binary_search(blocks, pindex, block);
-    
-    if (blocks[ret].orig == block) { // in index
-	return blocks[ret].mapped;
-    } else {
-	// now the tricky part. If it's not in the index, it's
-	// after the indexed blocks - the missing blocks
-	return block - ret + pindex - 1;
-    }
-}
 
 static unsigned char *static_empty = 0;
 
@@ -196,46 +181,21 @@ static const unsigned char *doener_uncompress(uint32_t part, int detach)
 
     com->part = part;
 
-    pthread_mutex_lock(&seeker);
-    if (fseek(packfile, offs[part], SEEK_SET)) {
-	fprintf(stderr, "seek failed\n");
-	return 0;
-    }
-#if defined(DEBUG)
-    fprintf(logger, "uncompress part=%d/%d com=%d off=%ld size=%ld ioff=%ld size=%ld\n", part, parts, com->index, offs[part], sizes[part], ioff, size );
-#endif
-    size_t readin = fread(com->in_buffer, 1, sizes[part], packfile);
-    if (readin != sizes[part]) {
-	fprintf(stderr, "short read: %d %d %ld %ld %ld\n", part, com->index, offs[part], sizes[part], readin);
-    }
     if (!hits[part]) {
-        fprintf(logger, "first hit %d\n", part );
-        hits[part] = ++hit_counter;
+      fprintf(logger, "first hit %d\n", part );
+      hits[part] = ++hit_counter;
     }
+
+    pthread_mutex_lock(&seeker);
+    size_t readin = doener_readpart(com->in_buffer, part);
 #if defined(DEBUG)
-    fprintf(logger, "uncompress %d %d %ld %ld\n", part, com->index, offs[part], sizes[part] );
+    fprintf(logger, "uncompress %d d %ld %ld\n", part, com->index, offs[part], sizes[part] );
 #endif
+    if (!readin)
+      return 0;
     pthread_mutex_unlock(&seeker);
 
-    const uint32_t flags = LZMA_TELL_UNSUPPORTED_CHECK | LZMA_CONCATENATED;
-    lzma_stream strm = LZMA_STREAM_INIT;
-
-    lzma_ret ret = lzma_auto_decoder(&strm, lzma_easy_decoder_memusage(preset), flags); 
-
-    strm.next_in = com->in_buffer;
-    strm.avail_in = readin;
-    strm.next_out = com->out_buffer;
-    strm.avail_out = bsize;
-
-    while (1) {
-	ret = lzma_code(&strm, LZMA_RUN);
-//	fprintf(logger, "ret %d\n", ret);
-	if (ret != LZMA_OK)
-	    break;
-    }
-
-    //assert (ret == LZMA_OK);
-    lzma_end(&strm);
+    doener_decompress_part(com->out_buffer, com->in_buffer, readin);
 
     com->part = part;
     com->free = 1;
