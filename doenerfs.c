@@ -381,13 +381,18 @@ int main(int argc, char *argv[])
     }
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
-    if (fuse_opt_parse(&args, NULL, doener_opt, doener_opt_proc) == -1) return 1;
+    if (fuse_opt_parse(&args, NULL, doener_opt, doener_opt_proc) == -1) {
+      perror("fuse_opt_part");
+      return 1;
+    }
 
     // not sure why but multiple threads make it slower
     fuse_opt_add_arg(&args, "-s");
 
-    if (doenerfs_read_pack(packfilename))
+    if (doenerfs_read_pack(packfilename)) {
+      perror("read_pack");
       return 1;
+    }
 
     // fake for write
     thefilesize += sparse_memory * 1024 * 1024;
