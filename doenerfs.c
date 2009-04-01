@@ -217,8 +217,28 @@ static const unsigned char *doener_uncompress(uint32_t part, int detach)
     return com->out_buffer;
 }
 
+static void doener_log_access(size_t block)
+{
+   static size_t firstblock = 0;
+   static ssize_t lastblock = -1;
+
+   if (lastblock >= 0 && block != (size_t)(lastblock + 1))
+   {
+       fprintf(stdout, "access %ld+%ld\n", firstblock, lastblock-firstblock);
+       firstblock = block;
+   }
+   lastblock = block;
+   if (block > firstblock + 30) 
+   {
+      fprintf(stdout, "access %ld+%ld\n", firstblock, lastblock-firstblock);
+      firstblock = block;
+   }
+}
+
 static size_t doener_write_block(const char *buf, off_t block, size_t size)
 {
+    doener_log_access(block);
+
     block = doener_map_block(block);
 
     off_t part = (int)(block * 4096 / bsize);
@@ -231,7 +251,7 @@ static size_t doener_write_block(const char *buf, off_t block, size_t size)
 static int doener_write(const char *path, const char *buf, size_t size, off_t offset,
 		       struct fuse_file_info *fi)
 {
-    fprintf(logger, "write %s %ld %ld\n", path, offset, size);
+    //fprintf(logger, "write %s %ld %ld\n", path, offset, size);
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
@@ -247,9 +267,7 @@ static int doener_write(const char *path, const char *buf, size_t size, off_t of
     assert(ioff == 0 || ioff + size <= 4096);
 
     if (size <= 4096) {
-
 	return doener_write_block(buf+ioff, block, size);
-
     } else {
 
 	size_t wrote = 0;
@@ -266,15 +284,23 @@ static int doener_write(const char *path, const char *buf, size_t size, off_t of
     }
 }
 
-static size_t doener_read_block(char *buf, off_t block)
-{
-    block = doener_map_block(block);
 
-    off_t part = (int)(block * 4096 / bsize);
+static size_t doener_read_block(char *buf, size_t block)
+{
+    if (block >= num_pages)
+	return 0;
+
+    assert(block < num_pages);
+    doener_log_access(block);
+
+    off_t mapped_block = doener_map_block(block);
+
+    size_t part = (size_t)(mapped_block * 4096 / bsize);
+    assert(part < parts);
 
     const unsigned char *partbuf = doener_uncompress(part, 0);
     assert(partbuf);
-    memcpy(buf, partbuf + 4096 * (block % (bsize / 4096)), 4096);
+    memcpy(buf, partbuf + 4096 * (mapped_block % (bsize / 4096)), 4096);
 
     return 4096;
 }
@@ -282,7 +308,7 @@ static size_t doener_read_block(char *buf, off_t block)
 static int doener_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
-    fprintf(logger, "read %s %ld %ld %p\n", path, offset, size, buf);
+    //fprintf(stdout, "read %ld %ld %ld\n", offset, size, thefilesize);
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
@@ -294,6 +320,8 @@ static int doener_read(const char *path, char *buf, size_t size, off_t offset,
 
     do
     {
+	if (offset >= (off_t)thefilesize)
+		break;
 	size_t diff = doener_read_block(buf, offset / 4096);
 	size -= diff;
 	buf += diff;
