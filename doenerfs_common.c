@@ -45,6 +45,7 @@ int doenerfs_read_pack(const char *packfilename)
     sprintf(expected, "SK%02d", DOENER_MAGIC);
     if (strcmp(head,expected)) {
 	fprintf(stderr, "wrong magic: %s vs %s\n", head, expected);
+	return 1;
     }
 
     uint32_t stringlen = readindex();
