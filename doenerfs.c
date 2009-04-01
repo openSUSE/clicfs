@@ -14,12 +14,10 @@ FILE *logger = 0;
 
 static int *hits = 0;
 static int hit_counter = 0;
-static uint32_t wparts = 0;
+static uint32_t write_pages = 0;
 
 static size_t detached_allocated = 0;
 static size_t sparse_memory = 0;
-
-static unsigned char **detached; 
 
 static int doener_getattr(const char *path, struct stat *stbuf)
 {
@@ -92,40 +90,11 @@ pthread_mutex_t picker = PTHREAD_MUTEX_INITIALIZER, seeker = PTHREAD_MUTEX_INITI
 
 FILE *pack;
 
-static unsigned char *static_empty = 0;
-
-static const unsigned char *doener_uncompress(uint32_t part, int detach)
+static const unsigned char *doener_uncompress(uint32_t part)
 {
     struct buffer_combo *com;
 
     //fprintf(logger, "doener_uncompress %d %d %d\n", part, parts, wparts);
-
-    if (part >= wparts) {
-         return 0;
-    }
-
-    if (detached[part])
-    {
-	return detached[part];
-    }
-
-    if (part >= parts)
-    {
-	// sparse fake
-	if (detach) {
-	    detached[part] = malloc(bsize);
-	    detached_allocated += bsize;
-	    fprintf(logger, "detached %.2f\n", detached_allocated / 1000000.);
-            fflush(logger);
-	    memset(detached[part], 0, bsize);
-	    return detached[part];
-	}
-	if (!static_empty) {
-	    static_empty = malloc(bsize);
-	    memset(static_empty,0,bsize);
-	}
-	return static_empty;
-    }
 
     pthread_mutex_lock(&picker);
     int index = -1;
@@ -163,17 +132,6 @@ static const unsigned char *doener_uncompress(uint32_t part, int detach)
     if (com->part == part)
     {
 	const unsigned char *buf = com->out_buffer;
-	if (detach) {
-	    detached[part] = malloc(bsize);
-	    detached_allocated += bsize;
-	    fprintf(logger, "detached %.2f\n", detached_allocated / 1000000.);
-            fflush(logger);
-	    memcpy(detached[part], com->out_buffer, bsize);
-	    // we can reuse it asap
-	    com->used = 0;
-	    buf = detached[part];
-	}
-	//fprintf(logger, "cached %d\n", com->index);
 	com->free = 1;
 	pthread_mutex_unlock(&com->lock);
 	return buf;
@@ -200,18 +158,6 @@ static const unsigned char *doener_uncompress(uint32_t part, int detach)
     com->part = part;
     com->free = 1;
 
-    if (detach) {
-	detached[part] = malloc(bsize);
-	memcpy(detached[part], com->out_buffer, bsize);
-	detached_allocated += bsize;
-	fprintf(logger, "detached %.3f\n", detached_allocated / 1000000.);
-        fflush(logger);
-	// we can reuse it asap
-	com->used = 0;
-	pthread_mutex_unlock(&com->lock);
-	return detached[part];
-    }
-
     pthread_mutex_unlock(&com->lock);
 
     return com->out_buffer;
@@ -235,16 +181,38 @@ static void doener_log_access(size_t block)
    }
 }
 
+static size_t doener_read_block(char *buf, size_t block);
+
+static int doener_detach(size_t block)
+{
+    unsigned char *ptr = blockmap[block];
+    if ((long)ptr & 1)
+    {
+	ptr = malloc(4096);
+	detached_allocated += 4096;
+	fprintf(logger, "detached %.3f\n", detached_allocated / 1000000.);
+
+	doener_read_block((char*)ptr, block);
+	blockmap[block] = ptr;
+	return 1;
+    } 
+    if (!blockmap[block])
+    {
+	blockmap[block] = malloc(4096);
+	detached_allocated += 4096;
+	fprintf(logger, "detached %.3f\n", detached_allocated / 1000000.);
+	memset(blockmap[block],0,4096);
+	return 1;
+    }
+
+    return 0;
+}
+
 static size_t doener_write_block(const char *buf, off_t block, size_t size)
 {
-    doener_log_access(block);
-
-    block = doener_map_block(block);
-
-    off_t part = (int)(block * 4096 / bsize);
-    unsigned char *partbuf = (unsigned char*)doener_uncompress(part, 1);
-    memcpy(partbuf + 4096 * (block % (bsize / 4096)), buf, size);
-
+    doener_detach(block);
+    fprintf(stdout, "wb %p\n", blockmap[block]);
+    memcpy(blockmap[block], buf, size);
     return size;
 }
 
@@ -256,8 +224,7 @@ static int doener_write(const char *path, const char *buf, size_t size, off_t of
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
 
-    off_t part = (int)(offset / bsize);
-    if (part >= wparts) {
+    if (offset >= (off_t)thefilesize) {
         return 0;
     }
 
@@ -269,7 +236,6 @@ static int doener_write(const char *path, const char *buf, size_t size, off_t of
     if (size <= 4096) {
 	return doener_write_block(buf+ioff, block, size);
     } else {
-
 	size_t wrote = 0;
 	do
 	{
@@ -293,12 +259,18 @@ static size_t doener_read_block(char *buf, size_t block)
     assert(block < num_pages);
     doener_log_access(block);
 
+    if (!((long)blockmap[block] & 1)) {
+	// detached
+	memcpy(buf, blockmap[block], 4096);
+	return 4096;
+    }
+
     off_t mapped_block = doener_map_block(block);
 
     size_t part = (size_t)(mapped_block * 4096 / bsize);
     assert(part < parts);
 
-    const unsigned char *partbuf = doener_uncompress(part, 0);
+    const unsigned char *partbuf = doener_uncompress(part);
     assert(partbuf);
     memcpy(buf, partbuf + 4096 * (mapped_block % (bsize / 4096)), 4096);
 
@@ -424,14 +396,14 @@ int main(int argc, char *argv[])
 
     // fake for write
     thefilesize += sparse_memory * 1024 * 1024;
+    write_pages = thefilesize / 4096;
 
-    wparts = thefilesize / bsize + 1;
-    detached = malloc(sizeof(unsigned char*) * wparts);
+    blockmap = realloc(blockmap, sizeof(unsigned char*)*write_pages);
+
     uint32_t i;
-    for (i = 0; i < wparts; ++i)
-    {
-	detached[i] = 0;
-    }
+ 
+    for (i = num_pages; i < write_pages; ++i)
+	blockmap[i] = 0;
 
     hits = malloc(sizeof(int)*parts);
     for (i = 0; i < parts; ++i)
