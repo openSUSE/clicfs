@@ -211,7 +211,6 @@ static int doener_detach(size_t block)
 static size_t doener_write_block(const char *buf, off_t block, size_t size)
 {
     doener_detach(block);
-    fprintf(stdout, "wb %p\n", blockmap[block]);
     memcpy(blockmap[block], buf, size);
     return size;
 }
