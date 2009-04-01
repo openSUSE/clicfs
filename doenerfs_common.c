@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <lzma.h>
+#include <string.h>
+#include <assert.h>
 
 int preset = 0;
 FILE *packfile = 0;
@@ -13,7 +15,8 @@ uint64_t *offs = 0;
 uint32_t parts = 0;
 uint32_t pindex = 0;
 size_t bsize = 0;
-struct block *blocks;
+unsigned char **blockmap;
+size_t num_pages = 0;
 
 static uint32_t readindex()
 {
@@ -35,7 +38,14 @@ int doenerfs_read_pack(const char *packfilename)
         fprintf(stderr, "packfile %s can't be opened\n", packfilename);
         return 1;
     }
-    fseek(packfile, 2, SEEK_SET);
+    char head[5];
+    char expected[5];
+    fread(head, 1, 4, packfile);
+    head[4] = 0;
+    sprintf(expected, "SK%02d", DOENER_MAGIC);
+    if (strcmp(head,expected)) {
+	fprintf(stderr, "wrong magic: %s vs %s\n", head, expected);
+    }
 
     uint32_t stringlen = readindex();
     if (stringlen == 0) {
@@ -48,23 +58,20 @@ int doenerfs_read_pack(const char *packfilename)
     }
     thefile[stringlen] = 0;
 
-    parts = readindex();
+    size_t oparts = readindex();
     bsize = readindex();
     thefilesize = readindex();
     preset = readindex();
-    pindex = readindex();
-    blocks = malloc(sizeof(struct block)*pindex);
+    num_pages = readindex();
+    blockmap = malloc(sizeof(unsigned char*)*num_pages);
 
     uint32_t i;
-    for (i = 0; i < pindex; ++i) {
-	blocks[i].mapped = i;
-	blocks[i].orig = readindex();
+    for (i = 0; i < num_pages; ++i) {
+	// make sure it's odd to diff between pointer and block
+	blockmap[i] = (unsigned char*)(long)((readindex() << 1) + 1);
     }
 
-    qsort(blocks, pindex, sizeof(struct block), block_cmp);
-
-    //fprintf(stderr, "file %ld %ld %ld %d\n", thefilesize, sparse_memory, bsize, parts);
-
+    parts = readindex();
     sizes = malloc(sizeof(uint64_t)*parts);
     offs = malloc(sizeof(uint64_t)*parts);
 
@@ -83,22 +90,18 @@ int doenerfs_read_pack(const char *packfilename)
         fprintf(stderr, "unreasonable part number 0\n");
 	return 1;
     }
-
+    fseek(packfile, (oparts-parts)*sizeof(uint64_t)*2, SEEK_CUR);
 
     return 0;
 }
 
 off_t doener_map_block(off_t block)
 {
-    int ret = binary_search(blocks, pindex, block);
-    
-    if (blocks[ret].orig == block) { // in index
-	return blocks[ret].mapped;
-    } else {
-	// now the tricky part. If it's not in the index, it's
-	// after the indexed blocks - the missing blocks
-	return block - ret + pindex - 1;
-    }
+    unsigned char *ptr = blockmap[block];
+    off_t ret = (off_t)ptr;
+    // calling map_block for detached blocks is bogus
+    assert(ret & 1);
+    return ret >> 1;
 }
 
 size_t doener_readpart(unsigned char *buffer, int part)

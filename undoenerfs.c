@@ -12,19 +12,22 @@ static unsigned char *outbuf = 0;
 
 static size_t doener_read_block(unsigned char *buf, off_t block)
 {
-    block = doener_map_block(block);
+    off_t mapped_block = doener_map_block(block);
+    assert(mapped_block < (off_t)num_pages);
 
-    off_t part = (int)(block * 4096 / bsize);
+    off_t part = (off_t)(mapped_block * 4096 / bsize);
+    assert(part < parts);
+    fprintf(stderr, "read part %ld block %ld mapped block %ld\n", part, block, mapped_block);
     if ( part != lastpart) {
-      size_t readin = doener_readpart(inbuf, part);
-      if (readin == 0) {
-	return 0;
-      }
-      doener_decompress_part(outbuf, inbuf, readin);
-      lastpart = part;
+	size_t readin = doener_readpart(inbuf, part);
+	if (readin == 0) {
+	    return 0;
+	}
+	doener_decompress_part(outbuf, inbuf, readin);
+	lastpart = part;
     }
 
-    memcpy(buf, outbuf + 4096 * (block % (bsize / 4096)), 4096);
+    memcpy(buf, outbuf + 4096 * (mapped_block % (bsize / 4096)), 4096);
 
     return 4096;
 }
@@ -44,10 +47,9 @@ int main(int argc, char *argv[])
 
     FILE *outfile = fopen(thefile, "w");
 
-    size_t bcount = thefilesize / 4096;
     size_t i;
     unsigned char tbuf[4096];
-    for (i = 0; i < bcount; ++i) 
+    for (i = 0; i < num_pages; ++i) 
     {
       size_t diff = doener_read_block(tbuf, i);
       assert(diff == 4096);
