@@ -17,6 +17,9 @@ static size_t doener_read_block(unsigned char *buf, off_t block)
     off_t part = (int)(block * 4096 / bsize);
     if ( part != lastpart) {
       size_t readin = doener_readpart(inbuf, part);
+      if (readin == 0) {
+	return 0;
+      }
       doener_decompress_part(outbuf, inbuf, readin);
       lastpart = part;
     }
