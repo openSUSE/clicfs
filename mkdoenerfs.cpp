@@ -1,4 +1,5 @@
-#define _GNU_SOURCE 
+//#define _GNU_SOURCE
+#include "doenerfs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -8,6 +9,10 @@
 #include <assert.h>
 #include <lzma.h>
 #include <limits.h>
+
+#include <openssl/md5.h>
+#include <map>
+#include <string>
 
 static size_t compress(int preset, unsigned char *in, size_t insize, unsigned char *out, size_t outsize)
 {
@@ -26,7 +31,7 @@ static size_t compress(int preset, unsigned char *in, size_t insize, unsigned ch
 	if (ret != LZMA_OK)
 	    break;
     }
-    
+
     ret = lzma_code(&strm, LZMA_FINISH);
     //fprintf(stderr, "ret %d\n", ret);
 
@@ -72,10 +77,10 @@ int main(int argc, char **argv)
     /* ext3 should be X blocks */
     if (blocks * 4096 != st.st_size)
 	blocks++;
-    
-    uint32_t *found = malloc(sizeof(uint32_t)*blocks);
+
+    uint32_t *found = ( uint32_t* )malloc(sizeof(uint32_t)*blocks);
     memset(found, 0, sizeof(int)*blocks);
-    uint32_t *ublocks = malloc(sizeof(uint32_t)*blocks);
+    uint32_t *ublocks = ( uint32_t* )malloc(sizeof(uint32_t)*blocks);
     memset(ublocks, 0, sizeof(int)*blocks);
 
     long pindex = 0;
@@ -100,23 +105,15 @@ int main(int argc, char **argv)
 		    if (offset + i < blocks && found[offset+i] == 0) {
 			ublocks[pindex++] = offset + i;
 			found[offset + i] = pindex;
-			//fprintf(stderr, "read %ld\n", offset + i);
-			// we only care for the first 250MB - to save memory later
-			if (pindex >= 64000)
-			    break;
 		    }
 		}
 	    }
-	    if (pindex >= 64000)
-		break;
 	}
 	fclose(pr);
     }
 
     fprintf(stderr, "pindex %ld %ld\n", pindex, blocks);
 
-    //binary_search(ublocks, pindex, 267413);
-    
     if (parts * blocksize != st.st_size)
 	parts++;
 
@@ -128,14 +125,15 @@ int main(int argc, char **argv)
 
     size_t total_in = 0;
     size_t total_out = 0;
-    
-    uint64_t *sizes = malloc(sizeof(uint64_t)*parts);
-    uint64_t *offs = malloc(sizeof(uint64_t)*parts);
+
+    uint64_t *sizes = ( uint64_t* )malloc(sizeof(uint64_t)*parts);
+    uint64_t *offs = ( uint64_t* )malloc(sizeof(uint64_t)*parts);
 
     off_t index_off = 2;
     int lastpercentage = 0;
 
-    fwrite("SK", 1, 2, out);
+    assert( DOENER_MAGIC < 100 );
+    fprintf(out, "SK%02d", DOENER_MAGIC );
 
     char fname[PATH_MAX];
     strcpy(fname, basename(infile));
@@ -179,31 +177,63 @@ int main(int argc, char **argv)
     uint32_t rindex = 0; // overall index
     uint32_t uindex = 0; // index for "unused" blocks
 
-    for (i = 0; i < parts; ++i)
-    {
-	uint b;
-	size_t readin = 0;
-	for (b=0;b<blocksperpart;b++) {
-	    if (rindex < pindex) {
-		fseek(in, ublocks[rindex] * 4096, SEEK_SET);
-	    } else {
-		while (found[uindex])  uindex++;
-		fseek(in, uindex * 4096, SEEK_SET);
-		uindex++;
-	    }
-	    readin += fread(inbuf+readin, 1, 4096, in);
-	    rindex++;
+    std::map<std::string,uint32_t> dups;
+    unsigned char md5[20];
+    char md5s[33];
 
-	}
+    parts = 0;
+    size_t currentblocksperpart = 0; // for debug output
+    size_t lastparts = 0; // for debug output
+
+    while ( rindex < blocks )
+    {
+	size_t currentblocks = 0;
+	size_t readin = 0;
+
+        while ( currentblocks < blocksperpart )
+        {
+            if (rindex < pindex) {
+                fseek(in, ublocks[rindex] * 4096, SEEK_SET);
+            } else {
+                while (found[uindex] && uindex < blocks)  uindex++;
+                assert( uindex < blocks );
+                if ( uindex < blocks ) {
+                    fseek(in, uindex * 4096, SEEK_SET);
+                    uindex++;
+                }
+            }
+            size_t diff= fread(inbuf+readin, 1, 4096, in);
+            MD5(inbuf+readin,4096, md5);
+            int j;
+            for (j = 0; j < 16; ++j)
+                sprintf(md5s+j*2, "%02x", md5[j]);
+            md5[32] = 0;
+            std::string sm = md5s;
+            if ( dups.find( sm ) != dups.end() ) {
+                //fprintf( stderr,  "already have %s\n",  sm.c_str() );
+            } else {
+                dups[sm] = uindex;
+                readin += diff;
+                currentblocks++;
+            }
+            rindex++;
+            currentblocksperpart++;
+            if ( rindex == blocks )
+                break;
+        }
 	size_t outsize = compress(preset, inbuf, readin, outbuf, blocksize + 300);
 	sizes[i] = outsize;
 	offs[i] = total_out + index_off;
 	total_in += readin;
 	total_out += outsize;
 	fwrite(outbuf, outsize, 1, out);
-        if ((int)(i * 100. / parts) > lastpercentage) {
-            fprintf(stderr, "part %d/%ld %d%% (total %d%%)\n", i, parts, (int)(outsize * 100 / readin), (int)(total_out * 100 / total_in));
+
+        parts++;
+        if ((int)(rindex * 100. / blocks) > lastpercentage || rindex >= blocks - 1) {
+            fprintf(stderr, "part blocks:%d%% parts:%ld bpp:%d current:%d%% total:%d%%\n", (int)(rindex * 100. / blocks), parts, ( int )( currentblocksperpart / ( parts - lastparts ) ),  (int)(outsize * 100 / readin), (int)(total_out * 100 / total_in));
             lastpercentage++;
+            lastparts = parts;
+            currentblocksperpart = 0;
         }
     }
 

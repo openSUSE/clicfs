@@ -6,6 +6,8 @@
 extern int preset;
 extern FILE *packfile;
 
+#define DOENER_MAGIC 1
+
 extern char thefile[PATH_MAX];
 extern size_t thefilesize;
 extern uint64_t *sizes;
@@ -25,7 +27,7 @@ static inline int block_cmp(const void *a, const void *b)
 {
     const struct block *ba = (const struct block *)a; // casting pointer types
     const struct block *bb = (const struct block *)b;
-    return ba->orig  - bb->orig; 
+    return ba->orig  - bb->orig;
 }
 
 /* slightly modified binary_search.
@@ -41,14 +43,14 @@ static inline int binary_search(struct block *A, int size, uint32_t target)
 	int mid = lo + (hi-lo)/2;
 	if (A[mid].orig == target)
 	    return mid;
-	else { 
-	    if (A[mid].orig < target) 
+	else {
+	    if (A[mid].orig < target)
 		lo = mid+1;
 	    else
 		hi = mid-1;
 	}
     }
-    
+
     return hi;
 }
 
