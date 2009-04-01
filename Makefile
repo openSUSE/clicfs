@@ -17,3 +17,8 @@ update:
 	cd openSUSE:Factory:Live/doenerfs/ ;\
 	osc commit -m "$$commit"  .
 	rm -rf openSUSE:Factory:Live
+
+install:
+	install -m 755 doenerfs /usr/bin
+	install -m 755 undoenerfs /usr/bin
+	install -m 755 mkdoenerfs /usr/bin
