@@ -70,7 +70,8 @@ int main(int argc, char **argv)
     long parts = st.st_size / blocksize;
     long blocks = st.st_size / 4096;
     /* ext3 should be X blocks */
-    assert(blocks * 4096 == st.st_size);
+    if (blocks * 4096 != st.st_size)
+	blocks++;
     
     uint32_t *found = malloc(sizeof(uint32_t)*blocks);
     memset(found, 0, sizeof(int)*blocks);
