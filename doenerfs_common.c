@@ -104,7 +104,7 @@ off_t doener_map_block(off_t block)
 size_t doener_readpart(unsigned char *buffer, int part)
 {
     if (fseek(packfile, offs[part], SEEK_SET)) {
-	fprintf(stderr, "seek failed\n");
+	fprintf(stderr, "seek failed %d %ld\n", part, offs[part]);
 	return 0;
     }
 #if defined(DEBUG)
