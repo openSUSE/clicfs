@@ -14,6 +14,19 @@
 #include <map>
 #include <string>
 
+static std::string calc_md5( unsigned char *d, size_t n )
+{
+    unsigned char md5[20];
+    char md5s[33];
+
+    MD5(d, n, md5);
+    int j;
+    for (j = 0; j < 16; ++j)
+        sprintf(md5s+j*2, "%02x", md5[j]);
+    md5[32] = 0;
+    return md5s;
+}
+
 static size_t compress(int preset, unsigned char *in, size_t insize, unsigned char *out, size_t outsize)
 {
     lzma_stream strm = LZMA_STREAM_INIT;
@@ -72,7 +85,8 @@ int main(int argc, char **argv)
     struct stat st;
     stat(infile, &st);
 
-    long parts = st.st_size / blocksize;
+    // the number of original parts - to be saved in header
+    long oparts = st.st_size / blocksize;
     long blocks = st.st_size / 4096;
     /* ext3 should be X blocks */
     if (blocks * 4096 != st.st_size)
@@ -114,8 +128,8 @@ int main(int argc, char **argv)
 
     fprintf(stderr, "pindex %ld %ld\n", pindex, blocks);
 
-    if (parts * blocksize != st.st_size)
-	parts++;
+    if (oparts * blocksize != st.st_size)
+	oparts++;
 
     FILE *in = fopen(infile, "r");
     FILE *out = fopen(outfile, "w");
@@ -126,10 +140,10 @@ int main(int argc, char **argv)
     size_t total_in = 0;
     size_t total_out = 0;
 
-    uint64_t *sizes = ( uint64_t* )malloc(sizeof(uint64_t)*parts);
-    uint64_t *offs = ( uint64_t* )malloc(sizeof(uint64_t)*parts);
+    uint64_t *sizes = ( uint64_t* )malloc(sizeof(uint64_t)*oparts);
+    uint64_t *offs = ( uint64_t* )malloc(sizeof(uint64_t)*oparts);
 
-    off_t index_off = 2;
+    off_t index_off = 4;
     int lastpercentage = 0;
 
     assert( DOENER_MAGIC < 100 );
@@ -142,7 +156,7 @@ int main(int argc, char **argv)
     fwrite(fname, 1, stringlen, out);
     index_off += sizeof(uint32_t) + stringlen;
 
-    stringlen = parts;
+    stringlen = oparts;
     fwrite((char*)&stringlen, 1, sizeof(uint32_t), out);
     index_off += sizeof(uint32_t);
 
@@ -158,18 +172,16 @@ int main(int argc, char **argv)
     fwrite((char*)&stringlen, 1, sizeof(uint32_t), out);
     index_off += sizeof(uint32_t);
 
-    stringlen = pindex;
+    stringlen = blocks;
     fwrite((char*)&stringlen, 1, sizeof(uint32_t), out);
     index_off += sizeof(uint32_t);
 
-    for (i = 0; i < pindex; ++i)
-    {
-	stringlen = ublocks[i];
-	fwrite((char*)&stringlen, 1, sizeof(uint32_t), out);
-	index_off += sizeof(uint32_t);
-    }
+    off_t index_blocks = index_off;
+    index_off += blocks * sizeof( uint32_t );
+    uint32_t *blockmap = new uint32_t[blocks];
 
-    index_off += 2 * parts * sizeof(uint64_t);
+    off_t index_part = index_off;
+    index_off += 2 * oparts * sizeof(uint64_t) + sizeof(uint32_t);
     fseek(out, index_off, SEEK_SET);
 
     uint32_t blocksperpart = blocksize/4096;
@@ -178,12 +190,13 @@ int main(int argc, char **argv)
     uint32_t uindex = 0; // index for "unused" blocks
 
     std::map<std::string,uint32_t> dups;
-    unsigned char md5[20];
-    char md5s[33];
 
-    parts = 0;
+    // the number of really saved parts
+    long parts = 0;
     size_t currentblocksperpart = 0; // for debug output
     size_t lastparts = 0; // for debug output
+
+    uint32_t usedblock = 0; // overall "mapped" index
 
     while ( rindex < blocks )
     {
@@ -203,15 +216,12 @@ int main(int argc, char **argv)
                 }
             }
             size_t diff= fread(inbuf+readin, 1, 4096, in);
-            MD5(inbuf+readin,4096, md5);
-            int j;
-            for (j = 0; j < 16; ++j)
-                sprintf(md5s+j*2, "%02x", md5[j]);
-            md5[32] = 0;
-            std::string sm = md5s;
+            std::string sm = calc_md5( inbuf+readin, diff );
             if ( dups.find( sm ) != dups.end() ) {
                 //fprintf( stderr,  "already have %s\n",  sm.c_str() );
+                blockmap[rindex] = dups[sm];
             } else {
+                blockmap[rindex] = usedblock++;
                 dups[sm] = uindex;
                 readin += diff;
                 currentblocks++;
@@ -221,7 +231,7 @@ int main(int argc, char **argv)
             if ( rindex == blocks )
                 break;
         }
-	size_t outsize = compress(preset, inbuf, readin, outbuf, blocksize + 300);
+        size_t outsize = compress(preset, inbuf, readin, outbuf, blocksize + 300);
 	sizes[i] = outsize;
 	offs[i] = total_out + index_off;
 	total_in += readin;
@@ -237,13 +247,30 @@ int main(int argc, char **argv)
         }
     }
 
-    fseek(out, index_off - 2 * parts * sizeof(uint64_t), SEEK_SET);
+    fseek(out, index_blocks, SEEK_SET);
+
+    for (i = 0; i < blocks; ++i)
+    {
+	fwrite((char*)( blockmap+i ), 1, sizeof(uint32_t), out);
+    }
+    // the remaining array parts (oparts-parts) stay sparse
+
+
+    fseek(out, index_part, SEEK_SET);
+    stringlen = parts;
+    fwrite((char*)&stringlen, 1, sizeof(uint32_t), out);
+    index_off += sizeof(uint32_t);
+
     for (i = 0; i < parts; ++i)
     {
 	fwrite((char*)(sizes + i), 1, sizeof(uint64_t), out);
 	fwrite((char*)(offs + i), 1, sizeof(uint64_t), out);
     }
+    // the remaining array parts (oparts-parts) stay sparse
+
     fclose(out);
+
+    delete [] blockmap;
 
     return 0;
 }
