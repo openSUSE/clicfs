@@ -170,13 +170,13 @@ static void doener_log_access(size_t block)
 
    if (lastblock >= 0 && block != (size_t)(lastblock + 1))
    {
-       fprintf(stdout, "access %ld+%ld\n", firstblock, lastblock-firstblock);
+       fprintf(logger, "access %ld+%ld\n", firstblock, lastblock-firstblock);
        firstblock = block;
    }
    lastblock = block;
    if (block > firstblock + 30) 
    {
-      fprintf(stdout, "access %ld+%ld\n", firstblock, lastblock-firstblock);
+      fprintf(logger, "access %ld+%ld\n", firstblock, lastblock-firstblock);
       firstblock = block;
    }
 }
