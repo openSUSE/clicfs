@@ -17,8 +17,8 @@ static size_t doener_read_block(unsigned char *buf, off_t block)
 
     off_t part = (off_t)(mapped_block * 4096 / bsize);
     assert(part < parts);
-    fprintf(stderr, "read part %ld block %ld mapped block %ld\n", part, block, mapped_block);
     if ( part != lastpart) {
+        fprintf(stderr, "read part %ld block %ld mapped block %ld\n", part, block, mapped_block);
 	size_t readin = doener_readpart(inbuf, part);
 	if (readin == 0) {
 	    return 0;
