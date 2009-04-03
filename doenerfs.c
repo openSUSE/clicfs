@@ -252,17 +252,25 @@ static int doener_write(const char *path, const char *buf, size_t size, off_t of
 
 static size_t doener_read_block(char *buf, size_t block)
 {
-    if (block >= num_pages)
+    if (block >= write_pages)
 	return 0;
 
-    assert(block < num_pages);
+    assert(block < write_pages);
     doener_log_access(block);
 
-    if (!((long)blockmap[block] & 1)) {
+    fprintf(logger, "read block %ld %lx %ld\n", block, (long)blockmap[block], ((long)blockmap[block] & 1));
+    if (!blockmap[block]) { // sparse block 
+        memset(buf, 0, 4096);
+        return 4096;
+    }
+
+    if (((long)blockmap[block] & 1) == 0) {
 	// detached
 	memcpy(buf, blockmap[block], 4096);
 	return 4096;
     }
+
+    assert(block < num_pages);
 
     off_t mapped_block = doener_map_block(block);
 
@@ -294,6 +302,8 @@ static int doener_read(const char *path, char *buf, size_t size, off_t offset,
 	if (offset >= (off_t)thefilesize)
 		break;
 	size_t diff = doener_read_block(buf, offset / 4096);
+	if (!diff)
+	  break;
 	size -= diff;
 	buf += diff;
 	offset += diff;
@@ -394,8 +404,11 @@ int main(int argc, char *argv[])
     }
 
     // fake for write
-    thefilesize += sparse_memory * 1024 * 1024;
-    write_pages = thefilesize / 4096;
+    if (sparse_memory) {
+      thefilesize = (thefilesize / 4096 * 4096) + sparse_memory * 1024 * 1024;
+      write_pages = thefilesize / 4096;
+    } else
+      write_pages = num_pages;
 
     blockmap = realloc(blockmap, sizeof(unsigned char*)*write_pages);
 
