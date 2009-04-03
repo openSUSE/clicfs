@@ -18,7 +18,6 @@ static size_t doener_read_block(unsigned char *buf, off_t block)
     off_t part = (off_t)(mapped_block * 4096 / bsize);
     assert(part < parts);
     if ( part != lastpart) {
-        fprintf(stderr, "read part %ld block %ld mapped block %ld\n", (long)part, (long)block, (long)mapped_block);
 	size_t readin = doener_readpart(inbuf, part);
 	if (readin == 0) {
 	    return 0;
@@ -47,11 +46,17 @@ int main(int argc, char *argv[])
 
     FILE *outfile = fopen(thefile, "w");
 
+    size_t delta = num_pages / 100;
+
     size_t i;
     unsigned char tbuf[4096];
-    for (i = 0; i < num_pages; ++i) 
+    for (i = 0; i < num_pages; ++i)
     {
       size_t diff = doener_read_block(tbuf, i);
+      if (i % delta == 0)
+	{
+	  fprintf(stderr, "read %d%%\n", (int)(i * 100 / num_pages));
+	}
       assert(diff == 4096);
       if (fwrite(tbuf, 1, 4096, outfile) != 4096) {
 	perror("write");
