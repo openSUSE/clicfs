@@ -23,7 +23,7 @@ static std::string calc_md5( unsigned char *d, size_t n )
     int j;
     for (j = 0; j < 16; ++j)
         sprintf(md5s+j*2, "%02x", md5[j]);
-    md5[32] = 0;
+    md5s[32] = 0;
     return md5s;
 }
 
