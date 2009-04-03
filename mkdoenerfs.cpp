@@ -107,14 +107,10 @@ int main(int argc, char **argv)
 	assert(pr);
 	char line[200];
 	while (fgets(line, sizeof(line)-1, pr)) {
-	    char fname[PATH_MAX];
 	    long offset, size;
-	    unsigned int addr;
-	    if (strncmp(line, "read ", 5))
+	    if (strncmp(line, "access ", 5))
 		continue;
-	    if (sscanf(line, "read %s %ld %ld %x", fname, &offset, &size, &addr) == 4) {
-		size = size / 4096;
-		offset = offset / 4096;
+	    if (sscanf(line, "access %ld+%ld", &offset, &size) == 2) {
 		for (i = 0; i < size; i++) {
 		    if (offset + i < num_pages && found[offset+i] == 0) {
 			ublocks[pindex++] = offset + i;
