@@ -1,13 +1,15 @@
 all: doenerfs mkdoenerfs undoenerfs
 
+CFLAGS=-g3 -W -Wall
+
 doenerfs: doenerfs.c doenerfs_common.c doenerfs.h
-	gcc -g3 -W -Wall -O0 -D_FORTIFY_SOURCE=2 -fstack-protector -funwind-tables -fasynchronous-unwind-tables doenerfs.c doenerfs_common.c -D_FILE_OFFSET_BITS=64  -llzma -lfuse -o doenerfs
+	gcc $(CFLAGS) doenerfs.c doenerfs_common.c -D_FILE_OFFSET_BITS=64  -llzma -lfuse -o doenerfs
 
 undoenerfs: undoenerfs.c doenerfs_common.c doenerfs.h
-	gcc -g3 -W -Wall -O0 -D_FORTIFY_SOURCE=2 -fstack-protector -funwind-tables -fasynchronous-unwind-tables undoenerfs.c doenerfs_common.c -D_FILE_OFFSET_BITS=64  -llzma -lfuse -o undoenerfs
+	gcc $(CFLAGS) undoenerfs.c doenerfs_common.c -D_FILE_OFFSET_BITS=64  -llzma -lfuse -o undoenerfs
 
 mkdoenerfs: mkdoenerfs.cpp
-	g++ -g3 -W -Wall -O0 -D_FORTIFY_SOURCE=2 -fstack-protector -funwind-tables -fasynchronous-unwind-tables mkdoenerfs.cpp -D_FILE_OFFSET_BITS=64  -llzma -lfuse -o mkdoenerfs -lcrypto
+	g++ $(CFLAGS) mkdoenerfs.cpp -D_FILE_OFFSET_BITS=64  -llzma -lfuse -o mkdoenerfs -lcrypto
 
 update:
 	rm -rf openSUSE:Factory:Live
