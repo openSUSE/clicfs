@@ -377,8 +377,8 @@ int doener_opt_proc(void *data, const char *arg, int key, struct fuse_args *outa
 	     sparse_memory = atoi(arg+2);
 	     return 0;
 	     break;
-	case FUSE_OPT_MEMORY:
-	     logfile = strdup(arg);
+	case FUSE_OPT_LOGGER:
+	     logfile = strdup(arg+2);
 	     return 0;
 	     break;
     }

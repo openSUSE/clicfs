@@ -201,12 +201,15 @@ int main(int argc, char **argv)
 
         while ( currentblocks < blocksperpart )
         {
+	    size_t cindex = 0;
             if (rindex < pindex) {
                 fseek(in, ublocks[rindex] * 4096, SEEK_SET);
+		cindex = ublocks[rindex];
             } else {
                 while (found[uindex] && uindex < num_pages)  uindex++;
                 assert( uindex < num_pages );
                 if ( uindex < num_pages ) {
+		    cindex = uindex;
                     fseek(in, uindex * 4096, SEEK_SET);
                     uindex++;
                 }
@@ -215,10 +218,10 @@ int main(int argc, char **argv)
             std::string sm = calc_md5( inbuf+readin, diff );
             if ( dups.find( sm ) != dups.end() ) {
                 //fprintf( stderr,  "already have %s\n",  sm.c_str() );
-                blockmap[rindex] = dups[sm];
+                blockmap[cindex] = dups[sm];
             } else {
-                blockmap[rindex] = usedblock++;
-                dups[sm] = blockmap[rindex];
+                blockmap[cindex] = usedblock++;
+                dups[sm] = blockmap[cindex];
                 readin += diff;
                 currentblocks++;
             }
@@ -249,8 +252,6 @@ int main(int argc, char **argv)
     {
 	fwrite((char*)( blockmap+i ), 1, sizeof(uint32_t), out);
     }
-    // the remaining array parts (oparts-parts) stay sparse
-
 
     fseek(out, index_part, SEEK_SET);
     stringlen = parts;
