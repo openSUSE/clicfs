@@ -140,14 +140,14 @@ static const unsigned char *doener_uncompress(uint32_t part)
     com->part = part;
 
     if (!hits[part]) {
-      fprintf(logger, "first hit %d\n", part );
+      if (logger) fprintf(logger, "first hit %d\n", part );
       hits[part] = ++hit_counter;
     }
 
     pthread_mutex_lock(&seeker);
     size_t readin = doener_readpart(com->in_buffer, part);
 #if defined(DEBUG)
-    fprintf(logger, "uncompress %d d %ld %ld\n", part, com->index, offs[part], sizes[part] );
+    if (logger) fprintf(logger, "uncompress %d d %ld %ld\n", part, com->index, offs[part], sizes[part] );
 #endif
     if (!readin)
       return 0;
@@ -170,13 +170,13 @@ static void doener_log_access(size_t block)
 
    if (lastblock >= 0 && block != (size_t)(lastblock + 1))
    {
-       fprintf(logger, "access %ld+%ld\n", firstblock, lastblock-firstblock);
+       if (logger) fprintf(logger, "access %ld+%ld\n", firstblock, lastblock-firstblock);
        firstblock = block;
    }
    lastblock = block;
    if (block > firstblock + 30) 
    {
-      fprintf(logger, "access %ld+%ld\n", firstblock, lastblock-firstblock);
+      if (logger) fprintf(logger, "access %ld+%ld\n", firstblock, lastblock-firstblock);
       firstblock = block;
    }
 }
@@ -190,7 +190,7 @@ static int doener_detach(size_t block)
     {
 	ptr = malloc(4096);
 	detached_allocated += 4096;
-	fprintf(logger, "detached %.3f\n", detached_allocated / 1000000.);
+	if (logger) fprintf(logger, "detached %.3f\n", detached_allocated / 1000000.);
 
 	doener_read_block((char*)ptr, block);
 	blockmap[block] = ptr;
@@ -200,7 +200,7 @@ static int doener_detach(size_t block)
     {
 	blockmap[block] = malloc(4096);
 	detached_allocated += 4096;
-	fprintf(logger, "detached %.3f\n", detached_allocated / 1000000.);
+	if (logger) fprintf(logger, "detached %.3f\n", detached_allocated / 1000000.);
 	memset(blockmap[block],0,4096);
 	return 1;
     }
@@ -218,7 +218,7 @@ static size_t doener_write_block(const char *buf, off_t block, size_t size)
 static int doener_write(const char *path, const char *buf, size_t size, off_t offset,
 		       struct fuse_file_info *fi)
 {
-    //fprintf(logger, "write %s %ld %ld\n", path, offset, size);
+    //if (logger) fprintf(logger, "write %s %ld %ld\n", path, offset, size);
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
@@ -258,7 +258,6 @@ static size_t doener_read_block(char *buf, size_t block)
     assert(block < write_pages);
     doener_log_access(block);
 
-    fprintf(logger, "read block %ld %lx %ld\n", block, (long)blockmap[block], ((long)blockmap[block] & 1));
     if (!blockmap[block]) { // sparse block 
         memset(buf, 0, 4096);
         return 4096;
@@ -352,11 +351,13 @@ static void doener_init_buffer(int i)
 }
 
 char *packfilename = 0;
+char *logfile = 0;
 
-enum  { FUSE_OPT_MEMORY };
+enum  { FUSE_OPT_MEMORY, FUSE_OPT_LOGGER };
 
 struct fuse_opt doener_opt[] = {
     FUSE_OPT_KEY("-m %s", FUSE_OPT_MEMORY),
+    FUSE_OPT_KEY("-l %s", FUSE_OPT_LOGGER),
     FUSE_OPT_END
 };
 
@@ -376,6 +377,10 @@ int doener_opt_proc(void *data, const char *arg, int key, struct fuse_args *outa
 	     sparse_memory = atoi(arg+2);
 	     return 0;
 	     break;
+	case FUSE_OPT_MEMORY:
+	     logfile = strdup(arg);
+	     return 0;
+	     break;
     }
 	
     return 1;
@@ -383,16 +388,22 @@ int doener_opt_proc(void *data, const char *arg, int key, struct fuse_args *outa
 
 int main(int argc, char *argv[])
 {
-    logger = fopen("/dev/shm/doenerfs.log", "w");
-    if (!logger) {
-	perror("open /dev/shm/doenerfs.log");
-        return 1;
-    }
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
     if (fuse_opt_parse(&args, NULL, doener_opt, doener_opt_proc) == -1) {
       perror("fuse_opt_part");
       return 1;
+    }
+
+    if (logfile) {
+      if (!strcmp(logfile, "-"))
+	logger = stderr;
+      else
+	logger = fopen(logfile, "w");
+      if (!logger) {
+	perror("open");
+        return 1;
+      }
     }
 
     // not sure why but multiple threads make it slower
