@@ -111,7 +111,7 @@ int main(int argc, char **argv)
 	    if (strncmp(line, "access ", 5))
 		continue;
 	    if (sscanf(line, "access %ld+%ld", &offset, &size) == 2) {
-		for (i = 0; i < size; i++) {
+		for (i = 0; i <= size; i++) {
 		    if (offset + i < num_pages && found[offset+i] == 0) {
 			ublocks[pindex++] = offset + i;
 			found[offset + i] = pindex;
@@ -225,6 +225,7 @@ int main(int argc, char **argv)
                 readin += diff;
                 currentblocks++;
             }
+	    //fprintf(stderr, "block %ld in part %ld\n", cindex, parts);
             rindex++;
             currentblocksperpart++;
             if ( rindex == num_pages )

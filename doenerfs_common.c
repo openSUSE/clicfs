@@ -99,7 +99,7 @@ int doenerfs_read_pack(const char *packfilename)
 off_t doener_map_block(off_t block)
 {
     unsigned char *ptr = blockmap[block];
-    off_t ret = (off_t)ptr;
+    size_t ret = (long)ptr;
     // calling map_block for detached blocks is bogus
     assert(ret & 1);
     return ret >> 1;
@@ -108,7 +108,7 @@ off_t doener_map_block(off_t block)
 size_t doener_readpart(unsigned char *buffer, int part)
 {
     if (fseek(packfile, offs[part], SEEK_SET)) {
-	fprintf(stderr, "seek failed %d %ld\n", part, offs[part]);
+	fprintf(stderr, "seek failed %d %ld\n", part, (long)offs[part]);
 	return 0;
     }
 #if defined(DEBUG)
@@ -116,7 +116,7 @@ size_t doener_readpart(unsigned char *buffer, int part)
 #endif
     size_t readin = fread(buffer, 1, sizes[part], packfile);
     if (readin != sizes[part]) {
-	fprintf(stderr, "short read: %d %ld %ld %ld\n", part, offs[part], sizes[part], readin);
+	fprintf(stderr, "short read: %d %ld %ld %ld\n", part, (long)offs[part], (long)sizes[part], (long)readin);
     }
     return readin;
 }
