@@ -1,15 +1,16 @@
 all: doenerfs mkdoenerfs undoenerfs
 
 CFLAGS=-g3 -W -Wall
+CPPFLAGS=-D_LARGEFILE_SOURCE=1  -D_FILE_OFFSET_BITS=64
 
 doenerfs: doenerfs.c doenerfs_common.c doenerfs.h
-	gcc $(CFLAGS) doenerfs.c doenerfs_common.c -D_FILE_OFFSET_BITS=64  -llzma -lfuse -o doenerfs
+	gcc $(CFLAGS) $(CPPFLAGS) doenerfs.c doenerfs_common.c -llzma -lfuse -o doenerfs
 
 undoenerfs: undoenerfs.c doenerfs_common.c doenerfs.h
-	gcc $(CFLAGS) undoenerfs.c doenerfs_common.c -D_FILE_OFFSET_BITS=64  -llzma -lfuse -o undoenerfs
+	gcc $(CFLAGS) $(CPPFLAGS) undoenerfs.c doenerfs_common.c -llzma -lfuse -o undoenerfs
 
 mkdoenerfs: mkdoenerfs.cpp
-	g++ $(CFLAGS) mkdoenerfs.cpp -D_FILE_OFFSET_BITS=64  -llzma -lfuse -o mkdoenerfs -lcrypto
+	g++ $(CFLAGS) $(CPPFLAGS) mkdoenerfs.cpp -llzma -lfuse -o mkdoenerfs -lcrypto
 
 update:
 	rm -rf openSUSE:Factory:Live
