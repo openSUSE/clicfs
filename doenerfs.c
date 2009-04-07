@@ -71,7 +71,6 @@ static int doener_open(const char *path, struct fuse_file_info *fi)
 }
 
 struct buffer_combo {
-    unsigned char *in_buffer;
     unsigned char *out_buffer;
     
     uint32_t part;
@@ -145,7 +144,8 @@ static const unsigned char *doener_uncompress(uint32_t part)
     }
 
     pthread_mutex_lock(&seeker);
-    size_t readin = doener_readpart(com->in_buffer, part);
+    unsigned char *inbuffer = malloc(sizes[part]);
+    size_t readin = doener_readpart(inbuffer, part);
     //#if defined(DEBUG)
       if (logger) fprintf(logger, "uncompress %d %d %ld %ld\n", part, com->index, (long)offs[part], (long)sizes[part] );
     //#endif
@@ -153,7 +153,8 @@ static const unsigned char *doener_uncompress(uint32_t part)
       return 0;
     pthread_mutex_unlock(&seeker);
 
-    doener_decompress_part(com->out_buffer, com->in_buffer, readin);
+    doener_decompress_part(com->out_buffer, inbuffer, readin);
+    free(inbuffer);
 
     com->part = part;
     com->free = 1;
@@ -345,8 +346,7 @@ static void doener_init_buffer(int i)
     coms[i].used = 0;
     coms[i].index = i + 1;
     coms[i].free = 1;
-    coms[i].in_buffer = malloc(bsize);
-    coms[i].out_buffer = malloc(bsize + 300);
+    coms[i].out_buffer = malloc(bsize);
     pthread_mutex_init(&coms[i].lock, 0);
 }
 
