@@ -26,3 +26,5 @@ install:
 	install -m 755 undoenerfs /usr/bin
 	install -m 755 mkdoenerfs /usr/bin
 
+clean:
+	rm -f doenerfs mkdoenerfs undoenerfs
