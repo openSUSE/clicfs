@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 FILE *logger = 0;
 
@@ -145,9 +146,13 @@ static const unsigned char *doener_uncompress(uint32_t part)
 
     pthread_mutex_lock(&seeker);
     unsigned char *inbuffer = malloc(sizes[part]);
+    struct timeval begin, end;
+    gettimeofday(&begin, 0);
     size_t readin = doener_readpart(inbuffer, part);
+    gettimeofday(&end, 0);
+
     //#if defined(DEBUG)
-      if (logger) fprintf(logger, "uncompress %d %d %ld %ld\n", part, com->index, (long)offs[part], (long)sizes[part] );
+      if (logger) fprintf(logger, "uncompress %d %d %ld %ld (read took %ld)\n", part, com->index, (long)offs[part], (long)sizes[part], (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000 );
     //#endif
     if (!readin)
       return 0;
