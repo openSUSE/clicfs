@@ -198,7 +198,7 @@ static int doener_detach(size_t block)
     {
 	ptr = malloc(4096);
 	detached_allocated += 4;
-	if (logger && detached_allocated % 1024 ) fprintf(logger, "detached %.3fMB\n", detached_allocated / 1024.);
+	if (logger && detached_allocated % 1024 == 0) fprintf(logger, "detached %.3fMB\n", detached_allocated / 1024.);
 
 	doener_read_block((char*)ptr, block);
 	blockmap[block] = ptr;
@@ -208,7 +208,7 @@ static int doener_detach(size_t block)
     {
 	blockmap[block] = malloc(4096);
 	detached_allocated += 4;
-	if (logger && detached_allocated % 1024 ) fprintf(logger, "detached %.3f\n", detached_allocated / 1024.);
+	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %.3f\n", detached_allocated / 1024.);
 	memset(blockmap[block],0,4096);
 	return 1;
     }
