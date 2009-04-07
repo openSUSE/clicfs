@@ -20,6 +20,8 @@ static uint32_t write_pages = 0;
 static size_t detached_allocated = 0;
 static size_t sparse_memory = 0;
 
+static struct timeval start;
+
 static int doener_getattr(const char *path, struct stat *stbuf)
 {
     //fprintf(logger, "getattr %s\n", path);
@@ -152,7 +154,7 @@ static const unsigned char *doener_uncompress(uint32_t part)
     gettimeofday(&end, 0);
 
     //#if defined(DEBUG)
-      if (logger) fprintf(logger, "uncompress %d %d %ld %ld (read took %ld)\n", part, com->index, (long)offs[part], (long)sizes[part], (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000 );
+      if (logger) fprintf(logger, "uncompress %d %d %ld %ld (read took %ld - started %ld)\n", part, com->index, (long)offs[part], (long)sizes[part], (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
     //#endif
     if (!readin)
       return 0;
@@ -444,6 +446,7 @@ int main(int argc, char *argv[])
     for (i = 0; i < com_count; ++i)
 	doener_init_buffer(i);
 
+    gettimeofday(&start, 0);
     int ret = fuse_main(args.argc, args.argv, &doener_oper, NULL);
     if (logger) fclose(logger);
     return ret;
