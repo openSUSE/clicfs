@@ -440,6 +440,6 @@ int main(int argc, char *argv[])
 	doener_init_buffer(i);
 
     int ret = fuse_main(args.argc, args.argv, &doener_oper, NULL);
-    fclose(logger);
+    if (logger) fclose(logger);
     return ret;
 }
