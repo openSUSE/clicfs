@@ -147,7 +147,7 @@ static const unsigned char *doener_uncompress(uint32_t part)
     pthread_mutex_lock(&seeker);
     size_t readin = doener_readpart(com->in_buffer, part);
     //#if defined(DEBUG)
-      if (logger) fprintf(logger, "uncompress %d %d %ld %ld\n", part, com->index, offs[part], sizes[part] );
+      if (logger) fprintf(logger, "uncompress %d %d %ld %ld\n", part, com->index, (long)offs[part], (long)sizes[part] );
     //#endif
     if (!readin)
       return 0;
