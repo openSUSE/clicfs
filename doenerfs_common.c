@@ -22,13 +22,14 @@ size_t bsize = 0;
 unsigned char **blockmap;
 size_t num_pages = 0;
 size_t cow_pages = 0;
+uint32_t *cows = 0;
+unsigned int cows_index = 0;
 
 uint32_t doener_readindex(FILE *f)
 {
     uint32_t stringlen;
     if (fread((char*)&stringlen, sizeof(uint32_t), 1, f) != 1) {
-	perror("read");
-        return -1;
+        return 0;
     }
     return stringlen;
 }
@@ -60,9 +61,12 @@ int doenerfs_read_cow(const char *cowfilename)
     for (i = 0; i < cow_pages; ++i)
     {
 	uint32_t pageindex = doener_readindex(cowfile);
+	uint32_t page = doener_readindex(cowfile);
 	assert(pageindex < num_pages);
-	blockmap[i] = (unsigned char*)(long)(pageindex << 2) + 2;
+	blockmap[pageindex] = (unsigned char*)(long)(page << 2) + 2;
     }
+    cows = malloc(uint32_t) * DOENER_COW_COUNT;
+    cowsindex = 0;
     return 0;
 }
 

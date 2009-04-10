@@ -20,6 +20,12 @@ extern size_t num_pages;
 // the number of pages in the cow index
 extern size_t cow_pages;
 
+#define DOENER_COW_COUNT 100
+
+// an array
+uint32_t *cows = 0;
+unsigned int cows_index = 0;
+
 extern unsigned char **blockmap;
 
 extern int doenerfs_read_pack(const char *packfilename);

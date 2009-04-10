@@ -198,23 +198,30 @@ static size_t doener_read_block(char *buf, size_t block);
 static int doener_detach(size_t block)
 {
     unsigned char *ptr = blockmap[block];
-    if (((long)ptr & 0x3) == 1)
+    if (((long)ptr & 0x3) == 1 || ((long)ptr & 0x3) == 2)
     {
-	ptr = malloc(4096);
-	assert(((long)ptr & 0x3) == 0);
-	detached_allocated += 4;
-	if (logger && detached_allocated % 1024 ) fprintf(logger, "detached %.3fMB\n", detached_allocated / 1024.);
+	if (((long)ptr & 0x3) == 2) {
+	    if (cowsindex == DOENER_COW_COUNT - 1) {
+		doener_write_cow();
+	    }
+	}
 
-	doener_read_block((char*)ptr, block);
-	blockmap[block] = ptr;
+	blockmap[block] = malloc(4096);
+	detached_allocated += 4;
+	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %.3fMB\n", detached_allocated / 1024.);
+
+	doener_read_block(blockmap[block], block);
+	cows[cowsindex++] = ptr >> 2;
+
 	return 1;
-    } 
+    }
+
     if (!blockmap[block])
     {
 	blockmap[block] = malloc(4096);
 	assert(((long)ptr & 0x3) == 0);
 	detached_allocated += 4;
-	if (logger && detached_allocated % 1024 ) fprintf(logger, "detached %.3f\n", detached_allocated / 1024.);
+	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %.3f\n", detached_allocated / 1024.);
 	memset(blockmap[block],0,4096);
 	return 1;
     }
@@ -263,7 +270,6 @@ static int doener_write(const char *path, const char *buf, size_t size, off_t of
     }
 }
 
-
 static size_t doener_read_block(char *buf, size_t block)
 {
     if (block >= write_pages)
@@ -277,19 +283,19 @@ static size_t doener_read_block(char *buf, size_t block)
         return 4096;
     }
 
-    if (((long)blockmap[block] & 0x3) == 0) {
+    long ptr = (long)blockmap[block];
+    if ((ptr & 0x3) == 0) {
 	// detached
 	memcpy(buf, blockmap[block], 4096);
 	return 4096;
     }
 
-    if (((long)blockmap[block] & 0x3) == 2) {
-	// in cow file
-	// TODO
-	return 4096;
+    if ((ptr & 0x3) == 2) {
+	fseek(cowfile, (ptr >> 2) * 4096, SEEK_SET);
+	return fread(buf, 1, 4096, cowfile);
     }
 
-    assert(((long)blockmap[block] & 0x3) == 1); // in read only part
+    assert((ptr & 0x3) == 1); // in read only part
     assert(block < num_pages);
 
     off_t mapped_block = doener_map_block(block);
@@ -358,8 +364,9 @@ static int doener_write_cow()
     for (i = 0; i < cowpages; ++i)
     {
 	uint32_t pageindex = doener_readindex(cowfile);
+	uint32_t page = doener_readindex(cowfile);
 	assert(pageindex < num_pages);
-	oldindex[pageindex] = i;
+	oldindex[pageindex] = page;
     }
 
     indexlen = sizeof(uint32_t) * 2;
@@ -370,7 +377,7 @@ static int doener_write_cow()
 	    uint32_t cowindex = doener_find_next_cow();
 	    fseek(cowfile, cowindex * 4096, SEEK_SET);
 	    int ret = fwrite(blockmap[i], 4096, 1, cowfile);
-	    if (!ret)
+	    if (ret != 1)
 		perror("write");
 	    fprintf(stderr, "detached %ld %ld %ld %d\n", (long)i, (long)oldindex[i], (long)cowindex * 4096, ret);
 	    free(blockmap[i]);
@@ -393,6 +400,7 @@ static int doener_write_cow()
 	    fwrite((char*)&key, 1, sizeof(uint32_t), cowfile);
 	    fwrite((char*)&value, 1, sizeof(uint32_t), cowfile);
 	    stringlen++;
+	    indexlen += 2 * sizeof(uint32_t);
 	}
     }
     // fill up the dummys (TODO: find out how many pages are there forehand)
@@ -401,6 +409,7 @@ static int doener_write_cow()
     for (i = stringlen; i < cow_pages; ++i)
     {
 	fwrite(dummy, 1, sizeof(uint32_t)*2, cowfile);
+	indexlen += 2 * sizeof(uint32_t);
     }
 
     fwrite((char*)&indexlen, 1, sizeof(uint32_t), cowfile);
