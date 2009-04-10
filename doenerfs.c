@@ -335,7 +335,7 @@ static int doener_read(const char *path, char *buf, size_t size, off_t offset,
 
 static uint32_t doener_find_next_cow()
 {
-    return 0;
+    return cow_pages;
 }
 
 static int doener_write_cow()
@@ -362,25 +362,50 @@ static int doener_write_cow()
 	oldindex[pageindex] = i;
     }
 
-    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cowfile);
     indexlen = sizeof(uint32_t) * 2;
-    stringlen = 0; // 0 blocks so far
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
 	if ((ptr & 0x3) == 0) { // detached now
-	    fprintf(stderr, "detached %ld %ld\n", (long)i, (long)oldindex[i]);
 	    uint32_t cowindex = doener_find_next_cow();
 	    fseek(cowfile, cowindex * 4096, SEEK_SET);
-	    fwrite(blockmap[i], 4096, 1, cowfile);
+	    int ret = fwrite(blockmap[i], 4096, 1, cowfile);
+	    if (!ret)
+		perror("write");
+	    fprintf(stderr, "detached %ld %ld %ld %d\n", (long)i, (long)oldindex[i], (long)cowindex * 4096, ret);
 	    free(blockmap[i]);
+	    cow_pages++;
 	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
 	}
     }
 
+    fseek(cowfile, cow_pages * 4096, SEEK_SET);
+    stringlen = thefilesize;
     fwrite((char*)&stringlen, 1, sizeof(uint32_t), cowfile);
+    stringlen = cow_pages;
+    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cowfile);
+    stringlen = 0;
+    for (i = 0; i < num_pages; ++i)
+    {
+	long ptr = (long)blockmap[i];
+	if ((ptr & 0x3) == 2) { // block
+	    uint32_t key = i, value = ptr >> 2;
+	    fwrite((char*)&key, 1, sizeof(uint32_t), cowfile);
+	    fwrite((char*)&value, 1, sizeof(uint32_t), cowfile);
+	    stringlen++;
+	}
+    }
+    // fill up the dummys (TODO: find out how many pages are there forehand)
+    char dummy[sizeof(uint32_t)*2];
+    memset(dummy, 0, sizeof(uint32_t)*2);
+    for (i = stringlen; i < cow_pages; ++i)
+    {
+	fwrite(dummy, 1, sizeof(uint32_t)*2, cowfile);
+    }
+
     fwrite((char*)&indexlen, 1, sizeof(uint32_t), cowfile);
     fflush(cowfile);
+    free(oldindex);
     return 0;
 }
   

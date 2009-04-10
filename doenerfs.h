@@ -17,6 +17,8 @@ extern uint32_t parts;
 extern uint32_t pindex;
 extern size_t bsize;
 extern size_t num_pages;
+// the number of pages in the cow index
+extern size_t cow_pages;
 
 extern unsigned char **blockmap;
 

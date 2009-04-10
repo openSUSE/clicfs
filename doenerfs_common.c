@@ -21,19 +21,21 @@ uint32_t pindex = 0;
 size_t bsize = 0;
 unsigned char **blockmap;
 size_t num_pages = 0;
+size_t cow_pages = 0;
 
 uint32_t doener_readindex(FILE *f)
 {
     uint32_t stringlen;
     if (fread((char*)&stringlen, sizeof(uint32_t), 1, f) != 1) {
-        return 0;
+	perror("read");
+        return -1;
     }
     return stringlen;
 }
 
 int doenerfs_read_cow(const char *cowfilename)
 {
-    cowfile = fopen(cowfilename, "r");
+    cowfile = fopen(cowfilename, "a+");
     if (!cowfile) {
 	fprintf(stderr, "cowfile %s can't be opened\n", cowfilename);
         return 1;
@@ -53,9 +55,9 @@ int doenerfs_read_cow(const char *cowfilename)
     uint32_t i;
     for (i = num_pages; i < newpages; ++i)
 	blockmap[i] = 0;
-    uint32_t cowpages = doener_readindex(cowfile);
-    fprintf(stderr, "cows %ld\n", (long)cowpages);
-    for (i = 0; i < cowpages; ++i)
+    cow_pages = doener_readindex(cowfile);
+    fprintf(stderr, "cows %ld\n", (long)cow_pages);
+    for (i = 0; i < cow_pages; ++i)
     {
 	uint32_t pageindex = doener_readindex(cowfile);
 	assert(pageindex < num_pages);
