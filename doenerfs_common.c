@@ -4,9 +4,13 @@
 #include <lzma.h>
 #include <string.h>
 #include <assert.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 int preset = 0;
 FILE *packfile = 0;
+FILE *cowfile = 0;
 
 char thefile[PATH_MAX];
 size_t thefilesize = 0;
@@ -18,21 +22,50 @@ size_t bsize = 0;
 unsigned char **blockmap;
 size_t num_pages = 0;
 
-static uint32_t readindex()
+static uint32_t readindex(FILE *f)
 {
     uint32_t stringlen;
-    if (fread((char*)&stringlen, sizeof(uint32_t), 1, packfile) != 1) {
+    if (fread((char*)&stringlen, sizeof(uint32_t), 1, f) != 1) {
         return 0;
     }
     return stringlen;
 }
 
-int doenerfs_read_pack(const char *packfilename)
+int doenerfs_read_cow(const char *cowfilename)
 {
-    if (!packfilename) {
-	fprintf(stderr, "usage: [-m <mb] <packfile> <mntpoint>\n");
+    cowfile = fopen(cowfilename, "r");
+    if (!cowfile) {
+	fprintf(stderr, "cowfile %s can't be opened\n", cowfilename);
         return 1;
     }
+    struct stat st;
+    stat(cowfilename, &st);
+    fseek(cowfile, st.st_size - sizeof(uint32_t), SEEK_SET);
+    uint32_t indexlen = readindex(cowfile) + sizeof(uint32_t);
+    fprintf(stderr, "index %ld %ld\n", (long)indexlen, ftell(cowfile));
+    if (fseek(cowfile, st.st_size - indexlen, SEEK_SET ))
+	perror("seek");
+    fprintf(stderr, "index %ld %ld\n", (long)indexlen, ftell(cowfile));
+    thefilesize = readindex(cowfile);
+    fprintf(stderr, "size %ld\n", (long)thefilesize);
+    uint32_t newpages = thefilesize / 4096;
+    blockmap = realloc(blockmap, sizeof(unsigned char*)*newpages);
+    uint32_t i;
+    for (i = num_pages; i < newpages; ++i)
+	blockmap[i] = 0;
+    uint32_t cowpages = readindex(cowfile);
+    fprintf(stderr, "cows %ld\n", (long)cowpages);
+    for (i = 0; i < cowpages; ++i)
+    {
+	uint32_t pageindex = readindex(cowfile);
+	assert(pageindex < num_pages);
+	blockmap[i] = (unsigned char*)(long)(pageindex << 2) + 2;
+    }
+    return 0;
+}
+
+int doenerfs_read_pack(const char *packfilename)
+{
     packfile = fopen(packfilename, "r");
     if (!packfile) {
         fprintf(stderr, "packfile %s can't be opened\n", packfilename);
@@ -48,7 +81,7 @@ int doenerfs_read_pack(const char *packfilename)
 	return 1;
     }
 
-    uint32_t stringlen = readindex();
+    uint32_t stringlen = readindex(packfile);
     if (stringlen == 0) {
 	fprintf(stderr, "abnormal len 0\n"); 
         return 1;
@@ -59,20 +92,20 @@ int doenerfs_read_pack(const char *packfilename)
     }
     thefile[stringlen] = 0;
 
-    size_t oparts = readindex();
-    bsize = readindex();
-    thefilesize = readindex();
-    preset = readindex();
-    num_pages = readindex();
+    size_t oparts = readindex(packfile);
+    bsize = readindex(packfile);
+    thefilesize = readindex(packfile);
+    preset = readindex(packfile);
+    num_pages = readindex(packfile);
     blockmap = malloc(sizeof(unsigned char*)*num_pages);
 
     uint32_t i;
     for (i = 0; i < num_pages; ++i) {
 	// make sure it's odd to diff between pointer and block
-	blockmap[i] = (unsigned char*)(long)((readindex() << 1) + 1);
+	blockmap[i] = (unsigned char*)(long)((readindex(packfile) << 2) + 1);
     }
 
-    parts = readindex();
+    parts = readindex(packfile);
     sizes = malloc(sizeof(uint64_t)*parts);
     offs = malloc(sizeof(uint64_t)*parts);
 
@@ -101,8 +134,8 @@ off_t doener_map_block(off_t block)
     unsigned char *ptr = blockmap[block];
     size_t ret = (long)ptr;
     // calling map_block for detached blocks is bogus
-    assert(ret & 1);
-    return ret >> 1;
+    assert((ret & 0x3) == 1);
+    return ret >> 2;
 }
 
 size_t doener_readpart(unsigned char *buffer, int part)

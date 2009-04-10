@@ -1,5 +1,6 @@
 #define FUSE_USE_VERSION  26
 
+#include <unistd.h>
 #include "doenerfs.h"   
 #include <fuse.h>
 #include <stdio.h>
@@ -173,18 +174,20 @@ static const unsigned char *doener_uncompress(uint32_t part)
 
 static void doener_log_access(size_t block)
 {
+   if (!logger) return;
+
    static size_t firstblock = 0;
    static ssize_t lastblock = -1;
 
    if (lastblock >= 0 && block != (size_t)(lastblock + 1))
    {
-       if (logger) fprintf(logger, "access %ld+%ld\n", (long)firstblock, (long)lastblock-firstblock);
+       fprintf(logger, "access %ld+%ld\n", (long)firstblock, (long)lastblock-firstblock);
        firstblock = block;
    }
    lastblock = block;
    if (block > firstblock + 30) 
    {
-      if (logger) fprintf(logger, "access %ld+%ld\n", (long)firstblock, (long)lastblock-firstblock);
+      fprintf(logger, "access %ld+%ld\n", (long)firstblock, (long)lastblock-firstblock);
       firstblock = block;
    }
 }
@@ -194,9 +197,10 @@ static size_t doener_read_block(char *buf, size_t block);
 static int doener_detach(size_t block)
 {
     unsigned char *ptr = blockmap[block];
-    if ((long)ptr & 1)
+    if (((long)ptr & 0x3) == 1)
     {
 	ptr = malloc(4096);
+	assert(((long)ptr & 0x3) == 0);
 	detached_allocated += 4;
 	if (logger && detached_allocated % 1024 ) fprintf(logger, "detached %.3fMB\n", detached_allocated / 1024.);
 
@@ -207,6 +211,7 @@ static int doener_detach(size_t block)
     if (!blockmap[block])
     {
 	blockmap[block] = malloc(4096);
+	assert(((long)ptr & 0x3) == 0);
 	detached_allocated += 4;
 	if (logger && detached_allocated % 1024 ) fprintf(logger, "detached %.3f\n", detached_allocated / 1024.);
 	memset(blockmap[block],0,4096);
@@ -271,12 +276,19 @@ static size_t doener_read_block(char *buf, size_t block)
         return 4096;
     }
 
-    if (((long)blockmap[block] & 1) == 0) {
+    if (((long)blockmap[block] & 0x3) == 0) {
 	// detached
 	memcpy(buf, blockmap[block], 4096);
 	return 4096;
     }
 
+    if (((long)blockmap[block] & 0x3) == 2) {
+	// in cow file
+	// TODO
+	return 4096;
+    }
+
+    assert(((long)blockmap[block] & 0x3) == 1); // in read only part
     assert(block < num_pages);
 
     off_t mapped_block = doener_map_block(block);
@@ -324,7 +336,11 @@ static int doener_flush(const char *path, struct fuse_file_info *fi)
 {
     (void)path;
     (void)fi;
-    fflush(logger);
+    // TODO write out cow
+    if (logger) {
+	fprintf(logger, "flush\n");
+	fflush(logger);
+    }
     return 0;
 }
 
@@ -333,7 +349,11 @@ static int doener_fsync(const char *path, int datasync, struct fuse_file_info *f
     (void)path;
     (void)fi;
     (void)datasync;
-    fflush(logger);
+    // TODO write out cow
+    if (logger) {
+	fprintf(logger, "sync\n");
+	fflush(logger);
+    }
     return 0;
 }
 
@@ -359,12 +379,14 @@ static void doener_init_buffer(int i)
 
 char *packfilename = 0;
 char *logfile = 0;
+char *cowfilename = 0;
 
-enum  { FUSE_OPT_MEMORY, FUSE_OPT_LOGGER };
+enum  { FUSE_OPT_MEMORY, FUSE_OPT_LOGGER, FUSE_OPT_COWFILE };
 
 struct fuse_opt doener_opt[] = {
     FUSE_OPT_KEY("-m %s", FUSE_OPT_MEMORY),
     FUSE_OPT_KEY("-l %s", FUSE_OPT_LOGGER),
+    FUSE_OPT_KEY("-c %s", FUSE_OPT_COWFILE),
     FUSE_OPT_END
 };
 
@@ -386,6 +408,10 @@ int doener_opt_proc(void *data, const char *arg, int key, struct fuse_args *outa
 	     break;
 	case FUSE_OPT_LOGGER:
 	     logfile = strdup(arg+2);
+	     return 0;
+	     break;
+	case FUSE_OPT_COWFILE:
+	     cowfilename = strdup(arg+2);
 	     return 0;
 	     break;
     }
@@ -416,19 +442,43 @@ int main(int argc, char *argv[])
     // not sure why but multiple threads make it slower
     fuse_opt_add_arg(&args, "-s");
 
+    if (!packfilename || (cowfile && sparse_memory)) {
+	fprintf(stderr, "usage: [-m <mb>] [-l <logfile|->] [-c <cowfile>] <packfile> <mntpoint>\n");
+	if (cowfile && sparse_memory) {
+	    fprintf(stderr, "writes can go either into cowfile or memory\n");
+	}
+        return 1;
+    }
+
     if (doenerfs_read_pack(packfilename)) {
       perror("read_pack");
       return 1;
+    }
+
+    if (cowfilename) {
+	if (access(cowfilename, W_OK)) {
+	    FILE *cow = fopen(cowfilename, "w");
+	    uint32_t stringlen = (thefilesize / 4096 * 4096) + 512 * 1024 * 1024;
+	    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
+	    stringlen = 0;
+	    // there are 0 blocks
+	    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
+	    // the whole index is 8 bytes long
+	    stringlen = sizeof(uint32_t) * 2;
+	    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
+	    fclose(cow);
+	}
+	if (doenerfs_read_cow(cowfilename))
+	    return 1;
     }
 
     // fake for write
     if (sparse_memory) {
       thefilesize = (thefilesize / 4096 * 4096) + sparse_memory * 1024 * 1024;
       write_pages = thefilesize / 4096;
+      blockmap = realloc(blockmap, sizeof(unsigned char*)*write_pages);
     } else
       write_pages = num_pages;
-
-    blockmap = realloc(blockmap, sizeof(unsigned char*)*write_pages);
 
     uint32_t i;
  
