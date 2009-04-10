@@ -20,6 +20,7 @@ static uint32_t write_pages = 0;
 
 static size_t detached_allocated = 0;
 static size_t sparse_memory = 0;
+static char *cowfilename = 0;
 
 static struct timeval start;
 
@@ -331,6 +332,57 @@ static int doener_read(const char *path, char *buf, size_t size, off_t offset,
 
     return readtotal;
 }
+
+static uint32_t doener_find_next_cow()
+{
+    return 0;
+}
+
+static int doener_write_cow()
+{
+    // TODO: this should be thread safe even if we do single thread only atm
+    uint32_t stringlen = thefilesize;
+    
+    struct stat st;
+    stat(cowfilename, &st);
+    fseek(cowfile, st.st_size - sizeof(uint32_t), SEEK_SET);
+    uint32_t indexlen = doener_readindex(cowfile) + sizeof(uint32_t);
+    if (fseek(cowfile, st.st_size - indexlen, SEEK_SET ))
+	perror("seek");
+    (void)doener_readindex(cowfile); // the file size
+    uint32_t cowpages = doener_readindex(cowfile);
+    fprintf(stderr, "old cows %ld\n", (long)cowpages);
+    uint32_t *oldindex = malloc(num_pages * sizeof(uint32_t));
+    memset(oldindex, 0, num_pages * sizeof(uint32_t));
+    uint32_t i;
+    for (i = 0; i < cowpages; ++i)
+    {
+	uint32_t pageindex = doener_readindex(cowfile);
+	assert(pageindex < num_pages);
+	oldindex[pageindex] = i;
+    }
+
+    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cowfile);
+    indexlen = sizeof(uint32_t) * 2;
+    stringlen = 0; // 0 blocks so far
+    for (i = 0; i < num_pages; ++i)
+    {
+	long ptr = (long)blockmap[i];
+	if ((ptr & 0x3) == 0) { // detached now
+	    fprintf(stderr, "detached %ld %ld\n", (long)i, (long)oldindex[i]);
+	    uint32_t cowindex = doener_find_next_cow();
+	    fseek(cowfile, cowindex * 4096, SEEK_SET);
+	    fwrite(blockmap[i], 4096, 1, cowfile);
+	    free(blockmap[i]);
+	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
+	}
+    }
+
+    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cowfile);
+    fwrite((char*)&indexlen, 1, sizeof(uint32_t), cowfile);
+    fflush(cowfile);
+    return 0;
+}
   
 static int doener_flush(const char *path, struct fuse_file_info *fi)
 {
@@ -341,6 +393,7 @@ static int doener_flush(const char *path, struct fuse_file_info *fi)
 	fprintf(logger, "flush\n");
 	fflush(logger);
     }
+    doener_write_cow();
     return 0;
 }
 
@@ -354,6 +407,8 @@ static int doener_fsync(const char *path, int datasync, struct fuse_file_info *f
 	fprintf(logger, "sync\n");
 	fflush(logger);
     }
+    doener_write_cow();
+    fsync(fileno(cowfile));
     return 0;
 }
 
@@ -379,7 +434,6 @@ static void doener_init_buffer(int i)
 
 char *packfilename = 0;
 char *logfile = 0;
-char *cowfilename = 0;
 
 enum  { FUSE_OPT_MEMORY, FUSE_OPT_LOGGER, FUSE_OPT_COWFILE };
 

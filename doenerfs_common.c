@@ -22,7 +22,7 @@ size_t bsize = 0;
 unsigned char **blockmap;
 size_t num_pages = 0;
 
-static uint32_t readindex(FILE *f)
+uint32_t doener_readindex(FILE *f)
 {
     uint32_t stringlen;
     if (fread((char*)&stringlen, sizeof(uint32_t), 1, f) != 1) {
@@ -41,23 +41,23 @@ int doenerfs_read_cow(const char *cowfilename)
     struct stat st;
     stat(cowfilename, &st);
     fseek(cowfile, st.st_size - sizeof(uint32_t), SEEK_SET);
-    uint32_t indexlen = readindex(cowfile) + sizeof(uint32_t);
+    uint32_t indexlen = doener_readindex(cowfile) + sizeof(uint32_t);
     fprintf(stderr, "index %ld %ld\n", (long)indexlen, ftell(cowfile));
     if (fseek(cowfile, st.st_size - indexlen, SEEK_SET ))
 	perror("seek");
     fprintf(stderr, "index %ld %ld\n", (long)indexlen, ftell(cowfile));
-    thefilesize = readindex(cowfile);
+    thefilesize = doener_readindex(cowfile);
     fprintf(stderr, "size %ld\n", (long)thefilesize);
     uint32_t newpages = thefilesize / 4096;
     blockmap = realloc(blockmap, sizeof(unsigned char*)*newpages);
     uint32_t i;
     for (i = num_pages; i < newpages; ++i)
 	blockmap[i] = 0;
-    uint32_t cowpages = readindex(cowfile);
+    uint32_t cowpages = doener_readindex(cowfile);
     fprintf(stderr, "cows %ld\n", (long)cowpages);
     for (i = 0; i < cowpages; ++i)
     {
-	uint32_t pageindex = readindex(cowfile);
+	uint32_t pageindex = doener_readindex(cowfile);
 	assert(pageindex < num_pages);
 	blockmap[i] = (unsigned char*)(long)(pageindex << 2) + 2;
     }
@@ -81,7 +81,7 @@ int doenerfs_read_pack(const char *packfilename)
 	return 1;
     }
 
-    uint32_t stringlen = readindex(packfile);
+    uint32_t stringlen = doener_readindex(packfile);
     if (stringlen == 0) {
 	fprintf(stderr, "abnormal len 0\n"); 
         return 1;
@@ -92,20 +92,20 @@ int doenerfs_read_pack(const char *packfilename)
     }
     thefile[stringlen] = 0;
 
-    size_t oparts = readindex(packfile);
-    bsize = readindex(packfile);
-    thefilesize = readindex(packfile);
-    preset = readindex(packfile);
-    num_pages = readindex(packfile);
+    size_t oparts = doener_readindex(packfile);
+    bsize = doener_readindex(packfile);
+    thefilesize = doener_readindex(packfile);
+    preset = doener_readindex(packfile);
+    num_pages = doener_readindex(packfile);
     blockmap = malloc(sizeof(unsigned char*)*num_pages);
 
     uint32_t i;
     for (i = 0; i < num_pages; ++i) {
 	// make sure it's odd to diff between pointer and block
-	blockmap[i] = (unsigned char*)(long)((readindex(packfile) << 2) + 1);
+	blockmap[i] = (unsigned char*)(long)((doener_readindex(packfile) << 2) + 1);
     }
 
-    parts = readindex(packfile);
+    parts = doener_readindex(packfile);
     sizes = malloc(sizeof(uint64_t)*parts);
     offs = malloc(sizeof(uint64_t)*parts);
 
