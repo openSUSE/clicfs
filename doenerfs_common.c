@@ -45,19 +45,16 @@ int doenerfs_read_cow(const char *cowfilename)
     stat(cowfilename, &st);
     fseek(cowfile, st.st_size - sizeof(uint32_t), SEEK_SET);
     uint32_t indexlen = doener_readindex(cowfile) + sizeof(uint32_t);
-    fprintf(stderr, "index %ld %ld\n", (long)indexlen, ftell(cowfile));
     if (fseek(cowfile, st.st_size - indexlen, SEEK_SET ))
 	perror("seek");
-    fprintf(stderr, "index %ld %ld\n", (long)indexlen, ftell(cowfile));
     thefilesize = doener_readindex(cowfile);
-    fprintf(stderr, "size %ld\n", (long)thefilesize);
     uint32_t newpages = thefilesize / 4096;
     blockmap = realloc(blockmap, sizeof(unsigned char*)*newpages);
     uint32_t i;
     for (i = num_pages; i < newpages; ++i)
 	blockmap[i] = 0;
+    num_pages = newpages;
     cow_pages = doener_readindex(cowfile);
-    fprintf(stderr, "cows %ld\n", (long)cow_pages);
     for (i = 0; i < cow_pages; ++i)
     {
 	uint32_t pageindex = doener_readindex(cowfile);
@@ -65,8 +62,8 @@ int doenerfs_read_cow(const char *cowfilename)
 	assert(pageindex < num_pages);
 	blockmap[pageindex] = (unsigned char*)(long)(page << 2) + 2;
     }
-    cows = malloc(uint32_t) * DOENER_COW_COUNT;
-    cowsindex = 0;
+    cows = malloc(sizeof(uint32_t) * DOENER_COW_COUNT);
+    cows_index = 0;
     return 0;
 }
 

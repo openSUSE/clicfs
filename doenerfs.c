@@ -14,8 +14,6 @@
 
 FILE *logger = 0;
 
-static int *hits = 0;
-static int hit_counter = 0;
 static uint32_t write_pages = 0;
 
 static size_t detached_allocated = 0;
@@ -23,6 +21,84 @@ static size_t sparse_memory = 0;
 static char *cowfilename = 0;
 
 static struct timeval start;
+
+static uint32_t doener_find_next_cow()
+{
+    //fprintf(stderr, "doener_find_next %ld %ld\n", (long)cows_index, (long)cow_pages);
+    if (cows_index > 0)
+	return cows[--cows_index];
+    return cow_pages++;
+}
+
+static int doener_write_cow()
+{
+    // TODO: this should be thread safe even if we do single thread only atm
+    uint32_t stringlen = thefilesize;
+    
+    struct stat st;
+    stat(cowfilename, &st);
+    fseek(cowfile, st.st_size - sizeof(uint32_t), SEEK_SET);
+    uint32_t indexlen = doener_readindex(cowfile) + sizeof(uint32_t);
+    if (fseek(cowfile, st.st_size - indexlen, SEEK_SET ))
+	perror("seek");
+    (void)doener_readindex(cowfile); // the file size
+    uint32_t cowpages = doener_readindex(cowfile);
+    uint32_t *oldindex = malloc(num_pages * sizeof(uint32_t));
+    memset(oldindex, 0, num_pages * sizeof(uint32_t));
+    uint32_t i;
+    for (i = 0; i < cowpages; ++i)
+    {
+	uint32_t pageindex = doener_readindex(cowfile);
+	uint32_t page = doener_readindex(cowfile);
+	assert(pageindex < num_pages);
+	oldindex[pageindex] = page;
+    }
+    fclose(cowfile);
+    cowfile = 0;
+    int fdcow = open(cowfilename, O_RDWR);
+
+    indexlen = sizeof(uint32_t) * 2;
+    for (i = 0; i < num_pages; ++i)
+    {
+	long ptr = (long)blockmap[i];
+	//fprintf(stderr, "ptr %ld %d\n", (long)i, (int)(ptr & 0x3));
+	if (ptr && (ptr & 0x3) == 0) { // detached now
+	    uint32_t cowindex = doener_find_next_cow();
+	    lseek(fdcow, cowindex * 4096, SEEK_SET);
+	    int ret = write(fdcow, blockmap[i], 4096);
+	    free(blockmap[i]);
+	    detached_allocated -= 4;
+	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
+	}
+    }
+
+    lseek(fdcow, cow_pages * 4096, SEEK_SET);
+    stringlen = thefilesize;
+    write(fdcow, (char*)&stringlen, sizeof(uint32_t));
+    stringlen = cow_pages;
+    write(fdcow, (char*)&stringlen, sizeof(uint32_t));
+    lseek(fdcow, cow_pages * 4096 + sizeof(uint32_t) * 2, SEEK_SET);
+    stringlen = 0;
+    for (i = 0; i < num_pages; ++i)
+    {
+	long ptr = (long)blockmap[i];
+	if ((ptr & 0x3) == 2) { // block
+	    uint32_t key = i, value = ptr >> 2;
+	    write(fdcow, (char*)&key, sizeof(uint32_t));
+	    write(fdcow, (char*)&value, sizeof(uint32_t));
+	    indexlen += 2 * sizeof(uint32_t);
+	    stringlen++;
+	}
+    }
+    assert(stringlen == cow_pages);
+    write(fdcow, (char*)&indexlen, sizeof(uint32_t));
+    free(oldindex);
+    
+    close(fdcow);
+    cowfile = fopen(cowfilename, "a+");
+
+    return 0;
+}
 
 static int doener_getattr(const char *path, struct stat *stbuf)
 {
@@ -143,11 +219,6 @@ static const unsigned char *doener_uncompress(uint32_t part)
 
     com->part = part;
 
-    if (!hits[part]) {
-      if (logger) fprintf(logger, "first hit %d\n", part );
-      hits[part] = ++hit_counter;
-    }
-
     pthread_mutex_lock(&seeker);
     unsigned char *inbuffer = malloc(sizes[part]);
     struct timeval begin, end;
@@ -155,9 +226,9 @@ static const unsigned char *doener_uncompress(uint32_t part)
     size_t readin = doener_readpart(inbuffer, part);
     gettimeofday(&end, 0);
 
-    //#if defined(DEBUG)
+#if defined(DEBUG)
       if (logger) fprintf(logger, "uncompress %d %d %ld %ld (read took %ld - started %ld)\n", part, com->index, (long)offs[part], (long)sizes[part], (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
-    //#endif
+#endif
     if (!readin)
       return 0;
     pthread_mutex_unlock(&seeker);
@@ -175,6 +246,7 @@ static const unsigned char *doener_uncompress(uint32_t part)
 
 static void doener_log_access(size_t block)
 {
+    return;
    if (!logger) return;
 
    static size_t firstblock = 0;
@@ -197,21 +269,28 @@ static size_t doener_read_block(char *buf, size_t block);
 
 static int doener_detach(size_t block)
 {
+    if (detached_allocated > 1500) {
+	doener_write_cow();
+    }
+
     unsigned char *ptr = blockmap[block];
     if (((long)ptr & 0x3) == 1 || ((long)ptr & 0x3) == 2)
     {
 	if (((long)ptr & 0x3) == 2) {
-	    if (cowsindex == DOENER_COW_COUNT - 1) {
+	    if (cows_index == DOENER_COW_COUNT - 1) {
+		fprintf(stderr, "too many cows\n");
 		doener_write_cow();
 	    }
 	}
 
-	blockmap[block] = malloc(4096);
+	char *newptr = malloc(4096);
 	detached_allocated += 4;
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %.3fMB\n", detached_allocated / 1024.);
 
-	doener_read_block(blockmap[block], block);
-	cows[cowsindex++] = ptr >> 2;
+	doener_read_block(newptr, block);
+	if (((long)ptr & 0x3) == 2) // we need to mark the place in the cow obsolete
+	    cows[cows_index++] = (long)ptr >> 2;
+	blockmap[block] = (unsigned char*)newptr;
 
 	return 1;
     }
@@ -338,95 +417,13 @@ static int doener_read(const char *path, char *buf, size_t size, off_t offset,
 
     return readtotal;
 }
-
-static uint32_t doener_find_next_cow()
-{
-    return cow_pages;
-}
-
-static int doener_write_cow()
-{
-    // TODO: this should be thread safe even if we do single thread only atm
-    uint32_t stringlen = thefilesize;
-    
-    struct stat st;
-    stat(cowfilename, &st);
-    fseek(cowfile, st.st_size - sizeof(uint32_t), SEEK_SET);
-    uint32_t indexlen = doener_readindex(cowfile) + sizeof(uint32_t);
-    if (fseek(cowfile, st.st_size - indexlen, SEEK_SET ))
-	perror("seek");
-    (void)doener_readindex(cowfile); // the file size
-    uint32_t cowpages = doener_readindex(cowfile);
-    fprintf(stderr, "old cows %ld\n", (long)cowpages);
-    uint32_t *oldindex = malloc(num_pages * sizeof(uint32_t));
-    memset(oldindex, 0, num_pages * sizeof(uint32_t));
-    uint32_t i;
-    for (i = 0; i < cowpages; ++i)
-    {
-	uint32_t pageindex = doener_readindex(cowfile);
-	uint32_t page = doener_readindex(cowfile);
-	assert(pageindex < num_pages);
-	oldindex[pageindex] = page;
-    }
-
-    indexlen = sizeof(uint32_t) * 2;
-    for (i = 0; i < num_pages; ++i)
-    {
-	long ptr = (long)blockmap[i];
-	if ((ptr & 0x3) == 0) { // detached now
-	    uint32_t cowindex = doener_find_next_cow();
-	    fseek(cowfile, cowindex * 4096, SEEK_SET);
-	    int ret = fwrite(blockmap[i], 4096, 1, cowfile);
-	    if (ret != 1)
-		perror("write");
-	    fprintf(stderr, "detached %ld %ld %ld %d\n", (long)i, (long)oldindex[i], (long)cowindex * 4096, ret);
-	    free(blockmap[i]);
-	    cow_pages++;
-	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
-	}
-    }
-
-    fseek(cowfile, cow_pages * 4096, SEEK_SET);
-    stringlen = thefilesize;
-    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cowfile);
-    stringlen = cow_pages;
-    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cowfile);
-    stringlen = 0;
-    for (i = 0; i < num_pages; ++i)
-    {
-	long ptr = (long)blockmap[i];
-	if ((ptr & 0x3) == 2) { // block
-	    uint32_t key = i, value = ptr >> 2;
-	    fwrite((char*)&key, 1, sizeof(uint32_t), cowfile);
-	    fwrite((char*)&value, 1, sizeof(uint32_t), cowfile);
-	    stringlen++;
-	    indexlen += 2 * sizeof(uint32_t);
-	}
-    }
-    // fill up the dummys (TODO: find out how many pages are there forehand)
-    char dummy[sizeof(uint32_t)*2];
-    memset(dummy, 0, sizeof(uint32_t)*2);
-    for (i = stringlen; i < cow_pages; ++i)
-    {
-	fwrite(dummy, 1, sizeof(uint32_t)*2, cowfile);
-	indexlen += 2 * sizeof(uint32_t);
-    }
-
-    fwrite((char*)&indexlen, 1, sizeof(uint32_t), cowfile);
-    fflush(cowfile);
-    free(oldindex);
-    return 0;
-}
   
 static int doener_flush(const char *path, struct fuse_file_info *fi)
 {
     (void)path;
     (void)fi;
     // TODO write out cow
-    if (logger) {
-	fprintf(logger, "flush\n");
-	fflush(logger);
-    }
+    if (logger)	fflush(logger);
     doener_write_cow();
     return 0;
 }
@@ -437,10 +434,7 @@ static int doener_fsync(const char *path, int datasync, struct fuse_file_info *f
     (void)fi;
     (void)datasync;
     // TODO write out cow
-    if (logger) {
-	fprintf(logger, "sync\n");
-	fflush(logger);
-    }
+    if (logger) fflush(logger);
     doener_write_cow();
     fsync(fileno(cowfile));
     return 0;
@@ -573,12 +567,6 @@ int main(int argc, char *argv[])
     for (i = num_pages; i < write_pages; ++i)
 	blockmap[i] = 0;
 
-    hits = malloc(sizeof(int)*parts);
-    for (i = 0; i < parts; ++i)
-    {
-        hits[i] = 0;
-    }
-    
     com_count = 6000000 / bsize; // get 6MB of cache
     coms = malloc(sizeof(struct buffer_combo) * com_count);
     for (i = 0; i < com_count; ++i)

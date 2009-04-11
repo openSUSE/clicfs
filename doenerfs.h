@@ -23,8 +23,8 @@ extern size_t cow_pages;
 #define DOENER_COW_COUNT 100
 
 // an array
-uint32_t *cows = 0;
-unsigned int cows_index = 0;
+extern uint32_t *cows;
+extern unsigned int cows_index;
 
 extern unsigned char **blockmap;
 
