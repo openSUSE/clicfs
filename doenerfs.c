@@ -32,6 +32,9 @@ static uint32_t doener_find_next_cow()
 
 static int doener_write_cow()
 {
+    if (!cowfilename)
+	return 0;
+
     // TODO: this should be thread safe even if we do single thread only atm
     uint32_t stringlen = thefilesize;
     
@@ -269,18 +272,15 @@ static size_t doener_read_block(char *buf, size_t block);
 
 static int doener_detach(size_t block)
 {
-    if (detached_allocated > 1500) {
+    if (detached_allocated > 1500 && cowfile)
 	doener_write_cow();
-    }
-
+    
     unsigned char *ptr = blockmap[block];
     if (((long)ptr & 0x3) == 1 || ((long)ptr & 0x3) == 2)
     {
 	if (((long)ptr & 0x3) == 2) {
-	    if (cows_index == DOENER_COW_COUNT - 1) {
-		fprintf(stderr, "too many cows\n");
+	    if (cows_index == DOENER_COW_COUNT - 1)
 		doener_write_cow();
-	    }
 	}
 
 	char *newptr = malloc(4096);
