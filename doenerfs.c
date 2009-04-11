@@ -65,7 +65,7 @@ static int doener_write_cow()
 	if (ptr && (ptr & 0x3) == 0) { // detached now
 	    uint32_t cowindex = doener_find_next_cow();
 	    lseek(fdcow, cowindex * 4096, SEEK_SET);
-	    int ret = write(fdcow, blockmap[i], 4096);
+	    write(fdcow, blockmap[i], 4096);
 	    free(blockmap[i]);
 	    detached_allocated -= 4;
 	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
