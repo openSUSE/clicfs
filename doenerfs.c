@@ -35,71 +35,43 @@ static int doener_write_cow()
     if (!cowfilename)
 	return 0;
 
-    // TODO: this should be thread safe even if we do single thread only atm
-    uint32_t stringlen = thefilesize;
-    
-    struct stat st;
-    stat(cowfilename, &st);
-    fseek(cowfile, st.st_size - sizeof(uint32_t), SEEK_SET);
-    uint32_t indexlen = doener_readindex(cowfile) + sizeof(uint32_t);
-    if (fseek(cowfile, st.st_size - indexlen, SEEK_SET ))
-	perror("seek");
-    (void)doener_readindex(cowfile); // the file size
-    uint32_t cowpages = doener_readindex(cowfile);
-    uint32_t *oldindex = malloc(num_pages * sizeof(uint32_t));
-    memset(oldindex, 0, num_pages * sizeof(uint32_t));
+    uint32_t indexlen = sizeof(uint32_t) * 2;
     uint32_t i;
-    for (i = 0; i < cowpages; ++i)
-    {
-	uint32_t pageindex = doener_readindex(cowfile);
-	uint32_t page = doener_readindex(cowfile);
-	assert(pageindex < num_pages);
-	oldindex[pageindex] = page;
-    }
-    fclose(cowfile);
-    cowfile = 0;
-    int fdcow = open(cowfilename, O_RDWR);
-
-    indexlen = sizeof(uint32_t) * 2;
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
 	//fprintf(stderr, "ptr %ld %d\n", (long)i, (int)(ptr & 0x3));
 	if (ptr && (ptr & 0x3) == 0) { // detached now
 	    uint32_t cowindex = doener_find_next_cow();
-	    lseek(fdcow, cowindex * 4096, SEEK_SET);
-	    write(fdcow, blockmap[i], 4096);
+	    lseek(cowfilefd, cowindex * 4096, SEEK_SET);
+	    write(cowfilefd, blockmap[i], 4096);
 	    free(blockmap[i]);
 	    detached_allocated -= 4;
 	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
 	}
     }
 
-    lseek(fdcow, cow_pages * 4096, SEEK_SET);
-    stringlen = thefilesize;
-    write(fdcow, (char*)&stringlen, sizeof(uint32_t));
+    lseek(cowfilefd, cow_pages * 4096, SEEK_SET);
+    uint32_t stringlen = thefilesize;
+    write(cowfilefd, (char*)&stringlen, sizeof(uint32_t));
     stringlen = cow_pages;
-    write(fdcow, (char*)&stringlen, sizeof(uint32_t));
-    lseek(fdcow, cow_pages * 4096 + sizeof(uint32_t) * 2, SEEK_SET);
+    write(cowfilefd, (char*)&stringlen, sizeof(uint32_t));
+    lseek(cowfilefd, cow_pages * 4096 + sizeof(uint32_t) * 2, SEEK_SET);
     stringlen = 0;
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
 	if ((ptr & 0x3) == 2) { // block
 	    uint32_t key = i, value = ptr >> 2;
-	    write(fdcow, (char*)&key, sizeof(uint32_t));
-	    write(fdcow, (char*)&value, sizeof(uint32_t));
+	    write(cowfilefd, (char*)&key, sizeof(uint32_t));
+	    write(cowfilefd, (char*)&value, sizeof(uint32_t));
 	    indexlen += 2 * sizeof(uint32_t);
 	    stringlen++;
 	}
     }
     assert(stringlen == cow_pages);
-    write(fdcow, (char*)&indexlen, sizeof(uint32_t));
-    free(oldindex);
+    write(cowfilefd, (char*)&indexlen, sizeof(uint32_t));
     
-    close(fdcow);
-    cowfile = fopen(cowfilename, "a+");
-
     return 0;
 }
 
@@ -249,7 +221,6 @@ static const unsigned char *doener_uncompress(uint32_t part)
 
 static void doener_log_access(size_t block)
 {
-    return;
    if (!logger) return;
 
    static size_t firstblock = 0;
@@ -272,7 +243,7 @@ static size_t doener_read_block(char *buf, size_t block);
 
 static int doener_detach(size_t block)
 {
-    if (detached_allocated > 1500 && cowfile)
+    if (detached_allocated > 1500 && cowfilefd != -1)
 	doener_write_cow();
     
     unsigned char *ptr = blockmap[block];
@@ -285,7 +256,7 @@ static int doener_detach(size_t block)
 
 	char *newptr = malloc(4096);
 	detached_allocated += 4;
-	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %.3fMB\n", detached_allocated / 1024.);
+	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 
 	doener_read_block(newptr, block);
 	if (((long)ptr & 0x3) == 2) // we need to mark the place in the cow obsolete
@@ -300,7 +271,7 @@ static int doener_detach(size_t block)
 	blockmap[block] = malloc(4096);
 	assert(((long)ptr & 0x3) == 0);
 	detached_allocated += 4;
-	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %.3f\n", detached_allocated / 1024.);
+	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 	memset(blockmap[block],0,4096);
 	return 1;
     }
@@ -370,8 +341,8 @@ static size_t doener_read_block(char *buf, size_t block)
     }
 
     if ((ptr & 0x3) == 2) {
-	fseek(cowfile, (ptr >> 2) * 4096, SEEK_SET);
-	return fread(buf, 1, 4096, cowfile);
+	lseek(cowfilefd, (ptr >> 2) * 4096, SEEK_SET);
+	return read(cowfilefd, buf, 4096);
     }
 
     assert((ptr & 0x3) == 1); // in read only part
@@ -436,7 +407,7 @@ static int doener_fsync(const char *path, int datasync, struct fuse_file_info *f
     // TODO write out cow
     if (logger) fflush(logger);
     doener_write_cow();
-    fsync(fileno(cowfile));
+    fsync(cowfilefd);
     return 0;
 }
 
@@ -519,14 +490,15 @@ int main(int argc, char *argv[])
 	perror("open");
         return 1;
       }
+      free(logfile);
     }
 
     // not sure why but multiple threads make it slower
     fuse_opt_add_arg(&args, "-s");
 
-    if (!packfilename || (cowfile && sparse_memory)) {
+    if (!packfilename || (cowfilename && sparse_memory)) {
 	fprintf(stderr, "usage: [-m <mb>] [-l <logfile|->] [-c <cowfile>] <packfile> <mntpoint>\n");
-	if (cowfile && sparse_memory) {
+	if (cowfilename && sparse_memory) {
 	    fprintf(stderr, "writes can go either into cowfile or memory\n");
 	}
         return 1;
@@ -536,6 +508,8 @@ int main(int argc, char *argv[])
       perror("read_pack");
       return 1;
     }
+
+    free(packfilename);
 
     if (cowfilename) {
 	if (access(cowfilename, W_OK)) {
@@ -574,6 +548,25 @@ int main(int argc, char *argv[])
 
     gettimeofday(&start, 0);
     int ret = fuse_main(args.argc, args.argv, &doener_oper, NULL);
+    doener_write_cow();
+    close(cowfilefd);
+    
     if (logger) fclose(logger);
+
+    free(blockmap);
+    for (i = 0; i < com_count; ++i)
+	free(coms[i].out_buffer);
+    free(coms);
+    free(sizes);
+    free(offs);
+    fclose(packfile);
+
+    if (cowfilename)
+	free(cowfilename);
+    if (cows)
+	free(cows);
+
+    fuse_opt_free_args(&args);
+
     return ret;
 }

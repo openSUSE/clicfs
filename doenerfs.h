@@ -5,7 +5,7 @@
 
 extern int preset;
 extern FILE *packfile;
-extern FILE *cowfile;
+extern int cowfilefd;
 
 #define DOENER_MAGIC 1
 
@@ -33,4 +33,4 @@ extern int doenerfs_read_cow(const char *packfilename);
 extern void doener_decompress_part(unsigned char *out, const unsigned char *in, size_t size);
 extern size_t doener_readpart(unsigned char *buffer, int part);
 extern off_t doener_map_block(off_t block);
-extern uint32_t doener_readindex(FILE *f);
+extern uint32_t doener_readindex_fd(int fd );
