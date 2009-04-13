@@ -267,7 +267,7 @@ int main(int argc, char **argv)
     // the remaining array parts (oparts-parts) stay sparse
 
     fclose(out);
-    close( in );
+    close( infd );
 
     delete [] blockmap;
 
