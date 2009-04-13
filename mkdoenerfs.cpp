@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <lzma.h>
 #include <limits.h>
+#include <fcntl.h>
 
 #include <openssl/md5.h>
 #include <map>
@@ -127,7 +128,7 @@ int main(int argc, char **argv)
     if (oparts * blocksize != st.st_size)
 	oparts++;
 
-    FILE *in = fopen(infile, "r");
+    int infd = open(infile, O_RDONLY);
     FILE *out = fopen(outfile, "w");
 
     unsigned char inbuf[blocksize];
@@ -212,8 +213,9 @@ int main(int argc, char **argv)
                     uindex++;
                 }
             }
-            fseek(in, cindex * 4096, SEEK_SET);
-            size_t diff= fread(inbuf+readin, 1, 4096, in);
+            if ( lseek( infd, cindex * 4096, SEEK_SET) == -1 )
+                perror( "seek" );
+            size_t diff= read( infd, inbuf+readin, 4096);
             std::string sm = calc_md5( inbuf+readin, diff );
             if ( dups.find( sm ) != dups.end() ) {
                 //fprintf( stderr,  "already have %s\n",  sm.c_str() );
@@ -265,6 +267,7 @@ int main(int argc, char **argv)
     // the remaining array parts (oparts-parts) stay sparse
 
     fclose(out);
+    close( in );
 
     delete [] blockmap;
 
