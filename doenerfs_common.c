@@ -21,8 +21,8 @@ uint32_t parts = 0;
 uint32_t pindex = 0;
 size_t bsize = 0;
 unsigned char **blockmap;
-size_t num_pages = 0;
-size_t cow_pages = 0;
+uint32_t num_pages = 0;
+uint32_t cow_pages = 0;
 uint32_t *cows = 0;
 unsigned int cows_index = 0;
 
