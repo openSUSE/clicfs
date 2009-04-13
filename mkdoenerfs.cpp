@@ -86,8 +86,8 @@ int main(int argc, char **argv)
     stat(infile, &st);
 
     // the number of original parts - to be saved in header
-    long oparts = st.st_size / blocksize;
-    long num_pages = st.st_size / 4096;
+    uint32_t oparts = st.st_size / blocksize;
+    uint32_t num_pages = st.st_size / 4096;
     /* ext3 should be X blocks */
     if (num_pages * 4096 != st.st_size)
 	num_pages++;
@@ -97,17 +97,17 @@ int main(int argc, char **argv)
     uint32_t *ublocks = ( uint32_t* )malloc(sizeof(uint32_t)*num_pages);
     memset(ublocks, 0, sizeof(int)*num_pages);
 
-    long pindex = 0;
+    uint32_t pindex = 0;
     // always take the first block to make the algorithm easier
     ublocks[pindex++] = 0;
     found[0] = pindex;
-    int i;
+    unsigned long i;
     if (profile) {
 	FILE *pr = fopen(profile, "r");
 	assert(pr);
 	char line[200];
 	while (fgets(line, sizeof(line)-1, pr)) {
-	    long offset, size;
+	    unsigned long offset, size;
 	    if (strncmp(line, "access ", 5))
 		continue;
 	    if (sscanf(line, "access %ld+%ld", &offset, &size) == 2) {
@@ -122,7 +122,7 @@ int main(int argc, char **argv)
 	fclose(pr);
     }
 
-    fprintf(stderr, "pindex %ld %ld\n", pindex, num_pages);
+    fprintf(stderr, "pindex %ld %ld\n", (long)pindex, (long)num_pages);
 
     if (oparts * blocksize != st.st_size)
 	oparts++;
@@ -188,20 +188,20 @@ int main(int argc, char **argv)
     std::map<std::string,uint32_t> dups;
 
     // the number of really saved parts
-    long parts = 0;
-    size_t currentblocksperpart = 0; // for debug output
-    size_t lastparts = 0; // for debug output
+    uint32_t parts = 0;
+    uint32_t currentblocksperpart = 0; // for debug output
+    uint32_t lastparts = 0; // for debug output
 
     uint32_t usedblock = 0; // overall "mapped" index
 
     while ( rindex < num_pages )
     {
-	size_t currentblocks = 0;
+	uint32_t currentblocks = 0;
 	size_t readin = 0;
 
         while ( currentblocks < blocksperpart )
         {
-	    size_t cindex = 0;
+	    uint32_t cindex = 0;
             if (rindex < pindex) {
                 fseek(in, ublocks[rindex] * 4096, SEEK_SET);
 		cindex = ublocks[rindex];
@@ -240,7 +240,7 @@ int main(int argc, char **argv)
 
         parts++;
         if ((int)(rindex * 100. / num_pages) > lastpercentage || rindex >= num_pages - 1) {
-            fprintf(stderr, "part blocks:%d%% parts:%ld bpp:%d current:%d%% total:%d%%\n", (int)(rindex * 100. / num_pages), parts, ( int )( currentblocksperpart / ( parts - lastparts ) ),  (int)(outsize * 100 / readin), (int)(total_out * 100 / total_in));
+            fprintf(stderr, "part blocks:%d%% parts:%ld bpp:%d current:%d%% total:%d%%\n", (int)(rindex * 100. / num_pages), (long)parts, ( int )( currentblocksperpart / ( parts - lastparts ) ),  (int)(outsize * 100 / readin), (int)(total_out * 100 / total_in));
             lastpercentage++;
             lastparts = parts;
             currentblocksperpart = 0;

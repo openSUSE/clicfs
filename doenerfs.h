@@ -16,9 +16,9 @@ extern uint64_t *offs;
 extern uint32_t parts;
 extern uint32_t pindex;
 extern size_t bsize;
-extern size_t num_pages;
+extern uint32_t num_pages;
 // the number of pages in the cow index
-extern size_t cow_pages;
+extern uint32_t cow_pages;
 
 #define DOENER_COW_COUNT 100
 
