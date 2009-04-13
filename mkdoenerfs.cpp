@@ -133,8 +133,8 @@ int main(int argc, char **argv)
     unsigned char inbuf[blocksize];
     unsigned char outbuf[blocksize + 300];
 
-    double total_in = 0;
-    double total_out = 0;
+    uint64_t total_in = 0;
+    uint64_t total_out = 0;
 
     uint64_t *sizes = ( uint64_t* )malloc(sizeof(uint64_t)*oparts);
     uint64_t *offs = ( uint64_t* )malloc(sizeof(uint64_t)*oparts);
