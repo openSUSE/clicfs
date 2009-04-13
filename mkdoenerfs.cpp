@@ -201,19 +201,18 @@ int main(int argc, char **argv)
 
         while ( currentblocks < blocksperpart )
         {
-	    uint32_t cindex = 0;
+	    off_t cindex = 0;
             if (rindex < pindex) {
-                fseek(in, ublocks[rindex] * 4096, SEEK_SET);
-		cindex = ublocks[rindex];
+                cindex = ublocks[rindex];
             } else {
                 while (found[uindex] && uindex < num_pages)  uindex++;
                 assert( uindex < num_pages );
                 if ( uindex < num_pages ) {
 		    cindex = uindex;
-                    fseek(in, uindex * 4096, SEEK_SET);
                     uindex++;
                 }
             }
+            fseek(in, cindex * 4096, SEEK_SET);
             size_t diff= fread(inbuf+readin, 1, 4096, in);
             std::string sm = calc_md5( inbuf+readin, diff );
             if ( dups.find( sm ) != dups.end() ) {
