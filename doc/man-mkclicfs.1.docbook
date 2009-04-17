@@ -1,0 +1,54 @@
+<?xml version="1.0" ?>
+<!-- vim:set ts=4 noet syntax=xml: -->
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.4//EN"
+        "http://www.oasis-open.org/docbook/xml/4.4/docbookx.dtd">
+
+<refentry lang="en">
+<refentryinfo>
+	<title>Clic FS User's Manual</title>
+	<author>
+          <personname>
+            <firstname>Stephan</firstname>
+            <surname>Kulow</surname>
+          </personname>
+        </author>
+	<date>April 16th, 2009</date>
+	<productname>Clic FS</productname>
+</refentryinfo>
+
+<refmeta>
+	<refentrytitle>FUSE Clic Mounter</refentrytitle>
+	<manvolnum>1</manvolnum>
+</refmeta>
+
+<refnamediv>
+	<refname>clicfs</refname>
+	<refpurpose>Mount Clic</refpurpose>
+</refnamediv>
+
+<refsynopsisdiv>
+<cmdsynopsis>
+<command>icecc</command>
+<arg choice="opt">
+  <option>options</option>
+</arg>
+<arg>-o OBJECT</arg>
+<arg>-c SOURCE</arg>
+</cmdsynopsis>
+</refsynopsisdiv>
+
+<refsect1>
+<title>Description</title>
+<para>Clic FS is a FUSE file system to mount a Compressed Loop Image Container. It has several features that make it a good choice for live systems.</para>
+</refsect1>
+
+<refsect1>
+<title>See Also</title>
+<para>mkclicfs, undoenerfs</para>
+</refsect1>
+
+<refsect1>
+<title>Author</title>
+<para>Stephan Kulow</para>
+</refsect1>
+</refentry>
