@@ -26,6 +26,12 @@ set ( CMAKE_C_FLAGS     "${CMAKE_C_FLAGS} -Werror -Wall -W" )
 set ( CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -g -O3" )
 set ( CMAKE_C_FLAGS_DEBUG     "${CMAKE_C_FLAGS} -g3 -O0" )
 
+SET( UPDATE_COMMAND
+  COMMAND /bin/bash ${CMAKE_SOURCE_DIR}/update.sh
+)
+
+add_custom_target( update ${UPDATE_COMMAND} VERBATIM )
+
 ADD_SUBDIRECTORY(src)
 #ADD_SUBDIRECTORY(doc)
 
