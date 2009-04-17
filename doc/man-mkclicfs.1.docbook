@@ -17,34 +17,40 @@
 </refentryinfo>
 
 <refmeta>
-	<refentrytitle>FUSE Clic Mounter</refentrytitle>
+	<refentrytitle>Create Clic File</refentrytitle>
 	<manvolnum>1</manvolnum>
 </refmeta>
 
 <refnamediv>
 	<refname>mkclicfs</refname>
-	<refpurpose>Mount Clic</refpurpose>
+	<refpurpose>Create Clic File</refpurpose>
 </refnamediv>
 
 <refsynopsisdiv>
 <cmdsynopsis>
-<command>icecc</command>
+<command>mkclicfs</command>
+<arg choice="plain">infile</arg>
+<arg choice="plain">outfile</arg>
+<arg choice="plain">blocksize</arg> 
 <arg choice="opt">
-  <option>options</option>
+  <option>preset</option>
 </arg>
-<arg>-o OBJECT</arg>
-<arg>-c SOURCE</arg>
+<arg choice="opt">
+  <option>profile</option>
+</arg>
 </cmdsynopsis>
 </refsynopsisdiv>
 
 <refsect1>
 <title>Description</title>
-<para>Clic FS is a FUSE file system to mount a Compressed Loop Image Container. It has several features that make it a good choice for live systems.</para>
+<para>The infile is a loop image (so far only tested with ext3) that is assumed to use 4K pages. The outfile is the Compressed Loop Image Container (Clic), it will contain X parts with blocksize. mkclicfs automatically discards duplicated pages. A good value for blocksize is 131072, it is a good balance between overhead and compression ratio and it will be default in future releases.</para>
+<para>The preset defines on how slow it is or how good it compresses. Compare with xz presets. -0 is fast and -9 is (very) slow - but the compression rate varies a lot - of course depending on the data. Preset 6 is the default.</para>
+<para>The profile is the logfile that is generated from clicfs -l, clicfs will output the access pattern and mkclicfs will reorder the blocks so they are in order.</para>
 </refsect1>
 
 <refsect1>
 <title>See Also</title>
-<para>mkclicfs, undoenerfs</para>
+<para>clicfs, undoenerfs</para>
 </refsect1>
 
 <refsect1>

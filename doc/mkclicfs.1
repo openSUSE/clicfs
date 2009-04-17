@@ -1,4 +1,4 @@
-.\"     Title: FUSE Clic Mounter
+.\"     Title: Create Clic File
 .\"    Author: Stephan Kulow
 .\" Generator: DocBook XSL Stylesheets v1.74.0 <http://docbook.sf.net/>
 .\"      Date: April 16th, 2009
@@ -6,7 +6,7 @@
 .\"    Source: Clic FS
 .\"  Language: English
 .\"
-.TH "FUSE CLIC MOUNTER" "1" "April 16th, 2009" "Clic FS" "Clic FS User's Manual"
+.TH "CREATE CLIC FILE" "1" "April 16th, 2009" "Clic FS" "Clic FS User's Manual"
 .\" -----------------------------------------------------------------
 .\" * (re)Define some macros
 .\" -----------------------------------------------------------------
@@ -167,18 +167,22 @@
 .\" * MAIN CONTENT STARTS HERE *
 .\" -----------------------------------------------------------------
 .SH "Name"
-mkclicfs \- Mount Clic
+mkclicfs \- Create Clic File
 .SH "Synopsis"
 .fam C
-.HP \w'\fBicecc\fR\ 'u
-\fBicecc\fR [\fBoptions\fR] [\-o\ OBJECT] [\-c\ SOURCE]
+.HP \w'\fBmkclicfs\fR\ 'u
+\fBmkclicfs\fR infile outfile blocksize [\fBpreset\fR] [\fBprofile\fR]
 .fam
 .SH "Description"
 .PP
-Clic FS is a FUSE file system to mount a Compressed Loop Image Container\&. It has several features that make it a good choice for live systems\&.
+The infile is a loop image (so far only tested with ext3) that is assumed to use 4K pages\&. The outfile is the Compressed Loop Image Container (Clic), it will contain X parts with blocksize\&. mkclicfs automatically discards duplicated pages\&. A good value for blocksize is 131072, it is a good balance between overhead and compression ratio and it will be default in future releases\&.
+.PP
+The preset defines on how slow it is or how good it compresses\&. Compare with xz presets\&. \-0 is fast and \-9 is (very) slow \- but the compression rate varies a lot \- of course depending on the data\&. Preset 6 is the default\&.
+.PP
+The profile is the logfile that is generated from clicfs \-l, clicfs will output the access pattern and mkclicfs will reorder the blocks so they are in order\&.
 .SH "See Also"
 .PP
-mkclicfs, undoenerfs
+clicfs, undoenerfs
 .SH "Author"
 .PP
 Stephan Kulow
