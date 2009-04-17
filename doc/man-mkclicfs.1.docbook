@@ -22,7 +22,7 @@
 </refmeta>
 
 <refnamediv>
-	<refname>clicfs</refname>
+	<refname>mkclicfs</refname>
 	<refpurpose>Mount Clic</refpurpose>
 </refnamediv>
 
