@@ -1,4 +1,4 @@
-#include "doenerfs.h"
+#include "clicfs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <lzma.h>
@@ -26,7 +26,7 @@ uint32_t cow_pages = 0;
 uint32_t *cows = 0;
 unsigned int cows_index = 0;
 
-uint32_t doener_readindex_fd(int fd)
+uint32_t clic_readindex_fd(int fd)
 {
     uint32_t stringlen = 0;
     if (read(fd, &stringlen, sizeof(uint32_t)) != sizeof(uint32_t)) {
@@ -35,7 +35,7 @@ uint32_t doener_readindex_fd(int fd)
     return stringlen;
 }
 
-uint32_t doener_readindex_file(FILE * f)
+uint32_t clic_readindex_file(FILE * f)
 {
     uint32_t stringlen = 0;
     if (fread(&stringlen, 1, sizeof(uint32_t), f) != sizeof(uint32_t)) {
@@ -44,7 +44,7 @@ uint32_t doener_readindex_file(FILE * f)
     return stringlen;
 }
 
-int doenerfs_read_cow(const char *cowfilename)
+int clicfs_read_cow(const char *cowfilename)
 {
     cowfilefd = open(cowfilename, O_RDWR);
     if (cowfilefd == -1 ) {
@@ -55,21 +55,21 @@ int doenerfs_read_cow(const char *cowfilename)
     struct stat st;
     fstat(cowfilefd, &st);
     lseek(cowfilefd, st.st_size - sizeof(uint32_t), SEEK_SET);
-    uint32_t indexlen = doener_readindex_fd(cowfilefd) + sizeof(uint32_t);
+    uint32_t indexlen = clic_readindex_fd(cowfilefd) + sizeof(uint32_t);
     if (lseek(cowfilefd, st.st_size - indexlen, SEEK_SET ) == -1)
 	perror("seek");
-    thefilesize = doener_readindex_fd(cowfilefd);
+    thefilesize = clic_readindex_fd(cowfilefd);
     uint32_t newpages = thefilesize / 4096;
     blockmap = realloc(blockmap, sizeof(unsigned char*)*newpages);
     uint32_t i;
     for (i = num_pages; i < newpages; ++i)
 	blockmap[i] = 0;
     num_pages = newpages;
-    cow_pages = doener_readindex_fd(cowfilefd);
+    cow_pages = clic_readindex_fd(cowfilefd);
     for (i = 0; i < cow_pages; ++i)
     {
-	uint32_t pageindex = doener_readindex_fd(cowfilefd);
-	uint32_t page = doener_readindex_fd(cowfilefd);
+	uint32_t pageindex = clic_readindex_fd(cowfilefd);
+	uint32_t page = clic_readindex_fd(cowfilefd);
 	assert(pageindex < num_pages);
 	blockmap[pageindex] = (unsigned char*)(long)(page << 2) + 2;
     }
@@ -78,7 +78,7 @@ int doenerfs_read_cow(const char *cowfilename)
     return 0;
 }
 
-int doenerfs_read_pack(const char *packfilename)
+int clicfs_read_pack(const char *packfilename)
 {
     packfile = fopen(packfilename, "r");
     if (!packfile) {
@@ -95,7 +95,7 @@ int doenerfs_read_pack(const char *packfilename)
 	return 1;
     }
 
-    uint32_t stringlen = doener_readindex_file(packfile);
+    uint32_t stringlen = clic_readindex_file(packfile);
     if (stringlen == 0 || stringlen >= PATH_MAX) {
 	fprintf(stderr, "abnormal len %lx\n", (long)stringlen); 
         return 1;
@@ -106,20 +106,20 @@ int doenerfs_read_pack(const char *packfilename)
     }
     thefile[stringlen] = 0;
 
-    size_t oparts = doener_readindex_file(packfile);
-    bsize = doener_readindex_file(packfile);
-    thefilesize = doener_readindex_file(packfile);
-    preset = doener_readindex_file(packfile);
-    num_pages = doener_readindex_file(packfile);
+    size_t oparts = clic_readindex_file(packfile);
+    bsize = clic_readindex_file(packfile);
+    thefilesize = clic_readindex_file(packfile);
+    preset = clic_readindex_file(packfile);
+    num_pages = clic_readindex_file(packfile);
     blockmap = malloc(sizeof(unsigned char*)*num_pages);
 
     uint32_t i;
     for (i = 0; i < num_pages; ++i) {
 	// make sure it's odd to diff between pointer and block
-	blockmap[i] = (unsigned char*)(long)((doener_readindex_file(packfile) << 2) + 1);
+	blockmap[i] = (unsigned char*)(long)((clic_readindex_file(packfile) << 2) + 1);
     }
 
-    parts = doener_readindex_file(packfile);
+    parts = clic_readindex_file(packfile);
     sizes = malloc(sizeof(uint64_t)*parts);
     offs = malloc(sizeof(uint64_t)*parts);
 
@@ -143,7 +143,7 @@ int doenerfs_read_pack(const char *packfilename)
     return 0;
 }
 
-off_t doener_map_block(off_t block)
+off_t clic_map_block(off_t block)
 {
     unsigned char *ptr = blockmap[block];
     size_t ret = (long)ptr;
@@ -152,7 +152,7 @@ off_t doener_map_block(off_t block)
     return ret >> 2;
 }
 
-size_t doener_readpart(unsigned char *buffer, int part)
+size_t clic_readpart(unsigned char *buffer, int part)
 {
     if (fseek(packfile, offs[part], SEEK_SET)) {
 	fprintf(stderr, "seek failed %d %ld\n", part, (long)offs[part]);
@@ -168,7 +168,7 @@ size_t doener_readpart(unsigned char *buffer, int part)
     return readin;
 }
 
-void doener_decompress_part(unsigned char *out, const unsigned char *in, size_t readin)
+void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t readin)
 {
     const uint32_t flags = LZMA_TELL_UNSUPPORTED_CHECK | LZMA_CONCATENATED;
     lzma_stream strm = LZMA_STREAM_INIT;

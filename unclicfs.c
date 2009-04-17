@@ -1,4 +1,4 @@
-#include "doenerfs.h"   
+#include "clicfs.h"   
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -10,19 +10,19 @@ static off_t lastpart = (off_t)-1;
 static unsigned char *inbuf = 0;
 static unsigned char *outbuf = 0;
 
-static size_t doener_read_block(unsigned char *buf, off_t block)
+static size_t clic_read_block(unsigned char *buf, off_t block)
 {
-    off_t mapped_block = doener_map_block(block);
+    off_t mapped_block = clic_map_block(block);
     assert(mapped_block < (off_t)num_pages);
 
     off_t part = (off_t)(mapped_block * 4096 / bsize);
     assert(part < parts);
     if ( part != lastpart) {
-	size_t readin = doener_readpart(inbuf, part);
+	size_t readin = clic_readpart(inbuf, part);
 	if (readin == 0) {
 	    return 0;
 	}
-	doener_decompress_part(outbuf, inbuf, readin);
+	clic_decompress_part(outbuf, inbuf, readin);
 	lastpart = part;
     }
 
@@ -38,7 +38,7 @@ int main(int argc, char *argv[])
     }
     const char *packfilename = argv[1];
     
-    if (doenerfs_read_pack(packfilename))
+    if (clicfs_read_pack(packfilename))
       return 1;
 
     inbuf = malloc(bsize + 300);
@@ -52,7 +52,7 @@ int main(int argc, char *argv[])
     unsigned char tbuf[4096];
     for (i = 0; i < num_pages; ++i)
     {
-      size_t diff = doener_read_block(tbuf, i);
+      size_t diff = clic_read_block(tbuf, i);
       if (i % delta == 0)
 	{
 	  fprintf(stderr, "read %d%%\n", (int)(i * 100 / num_pages));

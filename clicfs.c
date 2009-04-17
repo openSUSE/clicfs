@@ -1,7 +1,7 @@
 #define FUSE_USE_VERSION  26
 
 #include <unistd.h>
-#include "doenerfs.h"   
+#include "clicfs.h"   
 #include <fuse.h>
 #include <stdio.h>
 #include <string.h>
@@ -22,15 +22,15 @@ static char *cowfilename = 0;
 
 static struct timeval start;
 
-static uint32_t doener_find_next_cow()
+static uint32_t clic_find_next_cow()
 {
-    //fprintf(stderr, "doener_find_next %ld %ld\n", (long)cows_index, (long)cow_pages);
+    //fprintf(stderr, "clic_find_next %ld %ld\n", (long)cows_index, (long)cow_pages);
     if (cows_index > 0)
 	return cows[--cows_index];
     return cow_pages++;
 }
 
-static int doener_write_cow()
+static int clic_write_cow()
 {
     if (!cowfilename)
 	return 0;
@@ -42,7 +42,7 @@ static int doener_write_cow()
 	long ptr = (long)blockmap[i];
 	//fprintf(stderr, "ptr %ld %d\n", (long)i, (int)(ptr & 0x3));
 	if (ptr && (ptr & 0x3) == 0) { // detached now
-	    uint32_t cowindex = doener_find_next_cow();
+	    uint32_t cowindex = clic_find_next_cow();
 	    lseek(cowfilefd, cowindex * 4096, SEEK_SET);
 	    write(cowfilefd, blockmap[i], 4096);
 	    free(blockmap[i]);
@@ -75,7 +75,7 @@ static int doener_write_cow()
     return 0;
 }
 
-static int doener_getattr(const char *path, struct stat *stbuf)
+static int clic_getattr(const char *path, struct stat *stbuf)
 {
     //fprintf(logger, "getattr %s\n", path);
 
@@ -96,7 +96,7 @@ static int doener_getattr(const char *path, struct stat *stbuf)
     return res;
 }
   
-static int doener_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+static int clic_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 			 off_t offset, struct fuse_file_info *fi)
 {
     //fprintf(logger, "readdir %s\n", path);
@@ -113,7 +113,7 @@ static int doener_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     return 0;
 }
   
-static int doener_open(const char *path, struct fuse_file_info *fi)
+static int clic_open(const char *path, struct fuse_file_info *fi)
 {
     (void)fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
@@ -145,11 +145,11 @@ pthread_mutex_t picker = PTHREAD_MUTEX_INITIALIZER, seeker = PTHREAD_MUTEX_INITI
 
 FILE *pack;
 
-static const unsigned char *doener_uncompress(uint32_t part)
+static const unsigned char *clic_uncompress(uint32_t part)
 {
     struct buffer_combo *com;
 
-    //fprintf(logger, "doener_uncompress %d %d %d\n", part, parts, wparts);
+    //fprintf(logger, "clic_uncompress %d %d %d\n", part, parts, wparts);
 
     pthread_mutex_lock(&picker);
     int index = -1;
@@ -198,7 +198,7 @@ static const unsigned char *doener_uncompress(uint32_t part)
     unsigned char *inbuffer = malloc(sizes[part]);
     struct timeval begin, end;
     gettimeofday(&begin, 0);
-    size_t readin = doener_readpart(inbuffer, part);
+    size_t readin = clic_readpart(inbuffer, part);
     gettimeofday(&end, 0);
 
 #if defined(DEBUG)
@@ -208,7 +208,7 @@ static const unsigned char *doener_uncompress(uint32_t part)
       return 0;
     pthread_mutex_unlock(&seeker);
 
-    doener_decompress_part(com->out_buffer, inbuffer, readin);
+    clic_decompress_part(com->out_buffer, inbuffer, readin);
     free(inbuffer);
 
     com->part = part;
@@ -219,7 +219,7 @@ static const unsigned char *doener_uncompress(uint32_t part)
     return com->out_buffer;
 }
 
-static void doener_log_access(size_t block)
+static void clic_log_access(size_t block)
 {
    if (!logger) return;
 
@@ -239,26 +239,26 @@ static void doener_log_access(size_t block)
    }
 }
 
-static size_t doener_read_block(char *buf, size_t block);
+static size_t clic_read_block(char *buf, size_t block);
 
-static int doener_detach(size_t block)
+static int clic_detach(size_t block)
 {
     if (detached_allocated > 1500 && cowfilefd != -1)
-	doener_write_cow();
+	clic_write_cow();
     
     unsigned char *ptr = blockmap[block];
     if (((long)ptr & 0x3) == 1 || ((long)ptr & 0x3) == 2)
     {
 	if (((long)ptr & 0x3) == 2) {
 	    if (cows_index == DOENER_COW_COUNT - 1)
-		doener_write_cow();
+		clic_write_cow();
 	}
 
 	char *newptr = malloc(4096);
 	detached_allocated += 4;
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 
-	doener_read_block(newptr, block);
+	clic_read_block(newptr, block);
 	if (((long)ptr & 0x3) == 2) // we need to mark the place in the cow obsolete
 	    cows[cows_index++] = (long)ptr >> 2;
 	blockmap[block] = (unsigned char*)newptr;
@@ -279,14 +279,14 @@ static int doener_detach(size_t block)
     return 0;
 }
 
-static size_t doener_write_block(const char *buf, off_t block, size_t size)
+static size_t clic_write_block(const char *buf, off_t block, size_t size)
 {
-    doener_detach(block);
+    clic_detach(block);
     memcpy(blockmap[block], buf, size);
     return size;
 }
 
-static int doener_write(const char *path, const char *buf, size_t size, off_t offset,
+static int clic_write(const char *path, const char *buf, size_t size, off_t offset,
 		       struct fuse_file_info *fi)
 {
     //if (logger) fprintf(logger, "write %s %ld %ld\n", path, offset, size);
@@ -304,12 +304,12 @@ static int doener_write(const char *path, const char *buf, size_t size, off_t of
     assert(ioff == 0 || ioff + size <= 4096);
 
     if (size <= 4096) {
-	return doener_write_block(buf+ioff, block, size);
+	return clic_write_block(buf+ioff, block, size);
     } else {
 	size_t wrote = 0;
 	do
 	{
-	    size_t diff = doener_write_block(buf, block, size > 4096 ? 4096 : size);
+	    size_t diff = clic_write_block(buf, block, size > 4096 ? 4096 : size);
 	    size -= diff;
 	    buf += diff;
 	    block++;
@@ -320,13 +320,13 @@ static int doener_write(const char *path, const char *buf, size_t size, off_t of
     }
 }
 
-static size_t doener_read_block(char *buf, size_t block)
+static size_t clic_read_block(char *buf, size_t block)
 {
     if (block >= write_pages)
 	return 0;
 
     assert(block < write_pages);
-    doener_log_access(block);
+    clic_log_access(block);
 
     if (!blockmap[block]) { // sparse block 
         memset(buf, 0, 4096);
@@ -348,19 +348,19 @@ static size_t doener_read_block(char *buf, size_t block)
     assert((ptr & 0x3) == 1); // in read only part
     assert(block < num_pages);
 
-    off_t mapped_block = doener_map_block(block);
+    off_t mapped_block = clic_map_block(block);
 
     size_t part = (size_t)(mapped_block * 4096 / bsize);
     assert(part < parts);
 
-    const unsigned char *partbuf = doener_uncompress(part);
+    const unsigned char *partbuf = clic_uncompress(part);
     assert(partbuf);
     memcpy(buf, partbuf + 4096 * (mapped_block % (bsize / 4096)), 4096);
 
     return 4096;
 }
 
-static int doener_read(const char *path, char *buf, size_t size, off_t offset,
+static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
     //fprintf(stdout, "read %ld %ld %ld\n", offset, size, thefilesize);
@@ -377,7 +377,7 @@ static int doener_read(const char *path, char *buf, size_t size, off_t offset,
     {
 	if (offset >= (off_t)thefilesize)
 		break;
-	size_t diff = doener_read_block(buf, offset / 4096);
+	size_t diff = clic_read_block(buf, offset / 4096);
 	if (!diff)
 	  break;
 	size -= diff;
@@ -389,39 +389,39 @@ static int doener_read(const char *path, char *buf, size_t size, off_t offset,
     return readtotal;
 }
   
-static int doener_flush(const char *path, struct fuse_file_info *fi)
+static int clic_flush(const char *path, struct fuse_file_info *fi)
 {
     (void)path;
     (void)fi;
     // TODO write out cow
     if (logger)	fflush(logger);
-    doener_write_cow();
+    clic_write_cow();
     return 0;
 }
 
-static int doener_fsync(const char *path, int datasync, struct fuse_file_info *fi)
+static int clic_fsync(const char *path, int datasync, struct fuse_file_info *fi)
 {
     (void)path;
     (void)fi;
     (void)datasync;
     // TODO write out cow
     if (logger) fflush(logger);
-    doener_write_cow();
+    clic_write_cow();
     fsync(cowfilefd);
     return 0;
 }
 
-static struct fuse_operations doener_oper = {
-    .getattr   = doener_getattr,
-    .readdir = doener_readdir,
-    .open   = doener_open,
-    .read   = doener_read,
-    .write  = doener_write,
-    .flush  = doener_flush,
-    .fsync = doener_fsync
+static struct fuse_operations clic_oper = {
+    .getattr   = clic_getattr,
+    .readdir = clic_readdir,
+    .open   = clic_open,
+    .read   = clic_read,
+    .write  = clic_write,
+    .flush  = clic_flush,
+    .fsync = clic_fsync
 };
   
-static void doener_init_buffer(int i)
+static void clic_init_buffer(int i)
 {
     coms[i].part = -1;
     coms[i].used = 0;
@@ -436,14 +436,14 @@ char *logfile = 0;
 
 enum  { FUSE_OPT_MEMORY, FUSE_OPT_LOGGER, FUSE_OPT_COWFILE };
 
-struct fuse_opt doener_opt[] = {
+struct fuse_opt clic_opt[] = {
     FUSE_OPT_KEY("-m %s", FUSE_OPT_MEMORY),
     FUSE_OPT_KEY("-l %s", FUSE_OPT_LOGGER),
     FUSE_OPT_KEY("-c %s", FUSE_OPT_COWFILE),
     FUSE_OPT_END
 };
 
-int doener_opt_proc(void *data, const char *arg, int key, struct fuse_args *outargs)
+int clic_opt_proc(void *data, const char *arg, int key, struct fuse_args *outargs)
 {
     (void)data;
     (void)outargs;
@@ -476,7 +476,7 @@ int main(int argc, char *argv[])
 {
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
-    if (fuse_opt_parse(&args, NULL, doener_opt, doener_opt_proc) == -1) {
+    if (fuse_opt_parse(&args, NULL, clic_opt, clic_opt_proc) == -1) {
       perror("fuse_opt_part");
       return 1;
     }
@@ -504,7 +504,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (doenerfs_read_pack(packfilename)) {
+    if (clicfs_read_pack(packfilename)) {
       perror("read_pack");
       return 1;
     }
@@ -524,7 +524,7 @@ int main(int argc, char *argv[])
 	    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
 	    fclose(cow);
 	}
-	if (doenerfs_read_cow(cowfilename))
+	if (clicfs_read_cow(cowfilename))
 	    return 1;
     }
 
@@ -544,11 +544,11 @@ int main(int argc, char *argv[])
     com_count = 6000000 / bsize; // get 6MB of cache
     coms = malloc(sizeof(struct buffer_combo) * com_count);
     for (i = 0; i < com_count; ++i)
-	doener_init_buffer(i);
+	clic_init_buffer(i);
 
     gettimeofday(&start, 0);
-    int ret = fuse_main(args.argc, args.argv, &doener_oper, NULL);
-    doener_write_cow();
+    int ret = fuse_main(args.argc, args.argv, &clic_oper, NULL);
+    clic_write_cow();
     close(cowfilefd);
     
     if (logger) fclose(logger);

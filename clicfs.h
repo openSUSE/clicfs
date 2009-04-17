@@ -28,9 +28,9 @@ extern unsigned int cows_index;
 
 extern unsigned char **blockmap;
 
-extern int doenerfs_read_pack(const char *packfilename);
-extern int doenerfs_read_cow(const char *packfilename);
-extern void doener_decompress_part(unsigned char *out, const unsigned char *in, size_t size);
-extern size_t doener_readpart(unsigned char *buffer, int part);
-extern off_t doener_map_block(off_t block);
-extern uint32_t doener_readindex_fd(int fd );
+extern int clicfs_read_pack(const char *packfilename);
+extern int clicfs_read_cow(const char *packfilename);
+extern void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t size);
+extern size_t clic_readpart(unsigned char *buffer, int part);
+extern off_t clic_map_block(off_t block);
+extern uint32_t clic_readindex_fd(int fd );
