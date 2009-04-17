@@ -22,7 +22,7 @@ INCLUDE(CPack)
 # INCLUDES                                                         #
 ####################################################################
 
-set ( CMAKE_C_FLAGS     "${CMAKE_C_FLAGS} -Werror -Wall -W" )
+set ( CMAKE_C_FLAGS     "${CMAKE_C_FLAGS} -Wextra -Wall -W" )
 set ( CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -g -O3" )
 set ( CMAKE_C_FLAGS_DEBUG     "${CMAKE_C_FLAGS} -g3 -O0" )
 
