@@ -29,13 +29,13 @@
 <refsynopsisdiv>
 <cmdsynopsis>
 <command>unclicfs</command>
-<arg>file</arg>
+<arg choice="plain">file</arg>
 </cmdsynopsis>
 </refsynopsisdiv>
 
 <refsect1>
 <title>Description</title>
-<para>Unclicfs will extract the original file into the current directory. It's name was given</para>
+<para>Unclicfs will extract the original file into the current directory. It's name was given to mkclicfs as input file.</para>
 </refsect1>
 
 <refsect1>
