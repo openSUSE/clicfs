@@ -1,0 +1,31 @@
+PROJECT(clicfs)
+
+cmake_minimum_required(VERSION 2.4)
+
+ADD_DEFINITIONS( -D_FILE_OFFSET_BITS=64 )
+ADD_DEFINITIONS( -D_LARGEFILE_SOURCE=1 )
+
+SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Compresses Loop Image Container")
+SET(CPACK_PACKAGE_VENDOR "Novell Inc.")
+SET(CPACK_PACKAGE_VERSION_MAJOR ${LIBSATSOLVER_MAJOR})
+SET(CPACK_PACKAGE_VERSION_MINOR ${LIBSATSOLVER_MINOR})
+SET(CPACK_PACKAGE_VERSION_PATCH ${LIBSATSOLVER_PATCH})
+SET(CPACK_GENERATOR "TBZ2")
+SET(CPACK_SOURCE_GENERATOR "TBZ2")
+SET(CPACK_SOURCE_PACKAGE_FILE_NAME "${PACKAGE}-${VERSION}")
+SET(CPACK_SOURCE_TOPLEVEL_TAG "Linux-Source:")
+SET(CPACK_TOPLEVEL_TAG "Linux-Source:")
+
+INCLUDE(CPack)
+
+####################################################################
+# INCLUDES                                                         #
+####################################################################
+
+set ( CMAKE_C_FLAGS     "${CMAKE_C_FLAGS} -Werror -Wall -W" )
+set ( CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -g -O3" )
+set ( CMAKE_C_FLAGS_DEBUG     "${CMAKE_C_FLAGS} -g3 -O0" )
+
+ADD_SUBDIRECTORY(src)
+#ADD_SUBDIRECTORY(doc)
+
