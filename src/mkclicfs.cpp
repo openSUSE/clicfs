@@ -232,8 +232,9 @@ int main(int argc, char **argv)
                     uindex++;
                 }
             }
-            if ( lseek( infd, cindex * 4096, SEEK_SET) == -1 )
-                perror( "seek" );
+            if ( lseek( infd, cindex * 4096, SEEK_SET) == -1 ) {
+                perror( "seek" ); return 1;
+            }
             size_t diff= read( infd, inbuf+readin, 4096);
             std::string sm = calc_md5( inbuf+readin, diff );
             if ( dups.find( sm ) != dups.end() ) {
@@ -256,7 +257,9 @@ int main(int argc, char **argv)
 	offs[parts] = total_out + index_off;
 	total_in += readin;
 	total_out += outsize;
-	fwrite(outbuf, outsize, 1, out);
+	if (fwrite(outbuf, outsize, 1, out) != 1) {
+		perror("write"); return 1;
+        }
 
         parts++;
         if ((int)(rindex * 100. / num_pages) > lastpercentage || rindex >= num_pages - 1) {
@@ -267,21 +270,32 @@ int main(int argc, char **argv)
         }
     }
 
-    fseek(out, index_blocks, SEEK_SET);
+    if (fseek(out, index_blocks, SEEK_SET) < 0) {
+	perror("seek"); return 1;
+    }
 
     for (i = 0; i < num_pages; ++i)
     {
-	fwrite((char*)( blockmap+i ), 1, sizeof(uint32_t), out);
+	if (fwrite((char*)( blockmap+i ), sizeof(uint32_t), 1, out) != 1) {
+		perror("write"); return 1;
+        }
     }
 
-    fseek(out, index_part, SEEK_SET);
+    if (fseek(out, index_part, SEEK_SET) < 0) {
+        perror("seek"); return 1;
+    }
+
     stringlen = parts;
-    fwrite((char*)&stringlen, 1, sizeof(uint32_t), out);
+    if (fwrite((char*)&stringlen, sizeof(uint32_t), 1, out) != 1) {
+	perror("write"); return 1;
+    }
 
     for (i = 0; i < parts; ++i)
     {
-	fwrite((char*)(sizes + i), 1, sizeof(uint64_t), out);
-	fwrite((char*)(offs + i), 1, sizeof(uint64_t), out);
+	if (fwrite((char*)(sizes + i), sizeof(uint64_t), 1, out) != 1 || 
+	    fwrite((char*)(offs + i), sizeof(uint64_t), 1, out) != 1) {
+		perror("write"); return 1;
+        }
     }
     // the remaining array parts (oparts-parts) stay sparse
 
