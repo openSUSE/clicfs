@@ -295,7 +295,7 @@ int main(int argc, char **argv)
             }
 
             parts++;
-            if ((int)(rindex * 100. / num_pages) > lastpercentage || rindex >= num_pages - 1) {
+            if ((int)(rindex * 100. / num_pages) > lastpercentage || rindex >= num_pages - 1 && parts > lastparts && readin ) {
                 fprintf(stderr, "part blocks:%d%% parts:%ld bpp:%d current:%d%% total:%d%%\n",
                         (int)(rindex * 100. / num_pages), (long)parts,
                         (int)( currentblocksperpart / ( parts - lastparts ) ),
