@@ -29,28 +29,38 @@
 <refsynopsisdiv>
 <cmdsynopsis>
 <command>mkclicfs</command>
+<arg choice="opt">
+  <option>-d</option>
+</arg>
+<arg choice="opt">
+  <option>-p</option> <arg choice="plain">pagesize</arg>
+</arg>
+<arg choice="opt">
+  <option>-b</option> <arg choice="plain">blocksize</arg>
+</arg>
+<arg choice="opt">
+  <option>-c</option> <arg choice="plain">compression</arg>
+</arg>
+<arg choice="opt">
+  <option>-l</option> <arg choice="plain">logfile</arg>
+</arg>
 <arg choice="plain">infile</arg>
 <arg choice="plain">outfile</arg>
-<arg choice="plain">blocksize</arg> 
-<arg choice="opt">
-  <option>preset</option>
-</arg>
-<arg choice="opt">
-  <option>profile</option>
-</arg>
 </cmdsynopsis>
 </refsynopsisdiv>
 
 <refsect1>
 <title>Description</title>
-<para>The infile is a loop image (so far only tested with ext3) that is assumed to use 4K pages. The outfile is the Compressed Loop Image Container (Clic), it will contain X parts with blocksize. mkclicfs automatically discards duplicated pages. A good value for blocksize is 131072, it is a good balance between overhead and compression ratio and it will be default in future releases.</para>
-<para>The preset defines on how slow it is or how good it compresses. Compare with xz presets. -0 is fast and -9 is (very) slow - but the compression rate varies a lot - of course depending on the data. Preset 6 is the default.</para>
-<para>The profile is the logfile that is generated from clicfs -l, clicfs will output the access pattern and mkclicfs will reorder the blocks so they are in order.</para>
+<para>The infile is a loop image (so far only tested with ext3) that is assumed to use pages of pagesize. The outfile is the Compressed Loop Image Container (Clic), it will contain X parts with blocksize. mkclicfs automatically discards duplicated pages, unless -d is given.</para>
+<para>The default for the pagesize is 4096, the default for ext3</para>
+<para>The blocksize defines how many pages are grouped together before compression. The default is 32, it is a good balance between overhead and compression ratio.</para>
+<para>The compression preset defines on how slow it is or how good it compresses. Compare with xz presets. -c 0 is fast and -c 9 is (very) slow - but the compression rate varies a lot - of course depending on the data. Preset 6 is the default.</para>
+<para>The logfile is the logfile that is generated from clicfs -l, clicfs will output the access pattern and mkclicfs will reorder the blocks so they are in order.</para>
 </refsect1>
 
 <refsect1>
 <title>See Also</title>
-<para>clicfs, undoenerfs</para>
+<para>clicfs, unclicfs</para>
 </refsect1>
 
 <refsect1>

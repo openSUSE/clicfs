@@ -88,41 +88,64 @@ static size_t compress(int preset, unsigned char *in, size_t insize, unsigned ch
 
 int main(int argc, char **argv)
 {
-    if (argc < 4 ) {
-        fprintf(stderr, "usage: %s <infile> <outfile> <blocksize> [preset] [profile]\n", argv[0]);
-        return 1;
-    }
-    const char *infile = argv[1];
-    const char *outfile = argv[2];
-    int blocksize = atoi(argv[3]);
-
-    if (blocksize % 4096) {
-        fprintf(stderr, "blocksize needs to be 4096*x\n");
-        return 1;
-    }
-
-    int preset = 2;
+    bool check_dups = true;
+    int blocksize = 32;
+    int pagesize = pagesize;
     const char *profile = 0;
+    int preset = 2;
+    bool usage = false;
+    int opt;
 
-    if (argc > 4)
-        {
-            preset = atoi(argv[4]);
+    while ((opt = getopt(argc, argv, "dp:b:l:c:")) != -1) {
+        switch (opt) {
+        case 'd':
+            check_dups = false;
+            break;
+        case 'l':
+            profile = strdup(optarg);
+            break;
+        case 'b':
+            blocksize = atoi(optarg);
+            if (blocksize <= 0)
+                usage = true;
+            break;
+        case 'p':
+            pagesize = atoi(optarg);
+            if (pagesize <= 0)
+                usage = true;
+            break;
+        case 'c':
+            preset = atoi(optarg);
+            if (preset < 0 || preset > 9)
+                usage = true;
+            break;
+        default: /* '?' */
+            usage = true;
+            break;
         }
-
-    if (argc > 5)
-        {
-            profile = argv[5];
-        }
+    }
+    
+    if (argc != optind + 2 || usage) {
+        fprintf(stderr, "Usage: %s [-b <blocks>] [-p <pagesize>] [-d] [-c <preset>] [-l <logfile>] <infile> <outfile>\n",
+                argv[0]);
+        return EXIT_FAILURE;
+    }
+    
+    const char *infile = argv[optind++];
+    const char *outfile = argv[optind++];
 
     struct stat st;
     stat(infile, &st);
 
-    // the number of original parts - to be saved in header
-    uint32_t oparts = st.st_size / blocksize;
-    uint32_t num_pages = st.st_size / 4096;
+    uint32_t num_pages = st.st_size / pagesize;
     /* ext3 should be X blocks */
-    if (num_pages * 4096 != st.st_size)
+    if (num_pages * pagesize != st.st_size)
         num_pages++;
+
+    // the number of original parts - to be saved in header
+    uint32_t oparts = num_pages / blocksize;
+    if (oparts * blocksize != num_pages)
+        oparts++;
 
     uint32_t *found = ( uint32_t* )malloc(sizeof(uint32_t)*num_pages);
     memset(found, 0, sizeof(int)*num_pages);
@@ -156,14 +179,11 @@ int main(int argc, char **argv)
 
     fprintf(stderr, "pindex %ld %ld\n", (long)pindex, (long)num_pages);
 
-    if (oparts * blocksize != st.st_size)
-        oparts++;
-
     int infd = open(infile, O_RDONLY);
     FILE *out = fopen(outfile, "w");
 
-    unsigned char inbuf[blocksize];
-    unsigned char outbuf[blocksize + 300];
+    unsigned char inbuf[blocksize*pagesize];
+    unsigned char outbuf[blocksize*pagesize + 300];
 
     uint64_t total_in = 0;
     uint64_t total_out = 0;
@@ -186,19 +206,19 @@ int main(int argc, char **argv)
     }
     index_off += sizeof(uint32_t) + stringlen;
 
-    if (!writeindex(out,  oparts )) return 1;
+    if (!writeindex(out, oparts )) return 1;
     index_off += sizeof(uint32_t);
 
-    if (!writeindex(out,  blocksize )) return 1;
+    if (!writeindex(out, blocksize )) return 1;
     index_off += sizeof(uint32_t);
 
-    if (!writeindex(out,  st.st_size )) return 1;
+    if (!writeindex(out, pagesize )) return 1;
     index_off += sizeof(uint32_t);
 
-    if (!writeindex(out,  preset )) return 1;
+    if (!writeindex(out, preset )) return 1;
     index_off += sizeof(uint32_t);
 
-    if (!writeindex(out,  num_pages )) return 1;
+    if (!writeindex(out, num_pages )) return 1;
     index_off += sizeof(uint32_t);
 
     off_t index_blocks = index_off;
@@ -208,8 +228,6 @@ int main(int argc, char **argv)
     off_t index_part = index_off;
     index_off += 2 * oparts * sizeof(uint64_t) + sizeof(uint32_t);
     fseek(out, index_off, SEEK_SET);
-
-    uint32_t blocksperpart = blocksize/4096;
 
     uint32_t rindex = 0; // overall index
     uint32_t uindex = 0; // index for "unused" blocks
@@ -228,7 +246,7 @@ int main(int argc, char **argv)
             uint32_t currentblocks = 0;
             size_t readin = 0;
 
-            while ( currentblocks < blocksperpart )
+            while ( currentblocks < blocksize )
                 {
                     off_t cindex = 0;
                     if (rindex < pindex) {
@@ -241,13 +259,15 @@ int main(int argc, char **argv)
                             uindex++;
                         }
                     }
-                    if ( lseek( infd, cindex * 4096, SEEK_SET) == -1 ) {
+                    if ( lseek( infd, cindex * pagesize, SEEK_SET) == -1 ) {
                         perror( "seek" ); return 1;
                     }
-                    size_t diff= read( infd, inbuf+readin, 4096);
-                    std::string sm = calc_md5( inbuf+readin, diff );
-                    if ( dups.find( sm ) != dups.end() ) {
-                        //fprintf( stderr,  "already have %s\n",  sm.c_str() );
+                    size_t diff= read( infd, inbuf+readin, pagesize);
+                    std::string sm;
+                    if (check_dups) 
+                        sm = calc_md5( inbuf+readin, diff );
+                    if ( check_dups && dups.find( sm ) != dups.end() ) {
+                        //fprintf( stderr, "already have %s\n", sm.c_str() );
                         blockmap[cindex] = dups[sm];
                     } else {
                         blockmap[cindex] = usedblock++;
@@ -261,7 +281,7 @@ int main(int argc, char **argv)
                     if ( rindex == num_pages )
                         break;
                 }
-            size_t outsize = compress(preset, inbuf, readin, outbuf, blocksize + 300);
+            size_t outsize = compress(preset, inbuf, readin, outbuf, blocksize*pagesize + 300);
             sizes[parts] = outsize;
             offs[parts] = total_out + index_off;
             total_in += readin;
@@ -272,9 +292,9 @@ int main(int argc, char **argv)
 
             parts++;
             if ((int)(rindex * 100. / num_pages) > lastpercentage || rindex >= num_pages - 1) {
-                fprintf(stderr, "part blocks:%d%% parts:%ld bpp:%d current:%d%% total:%d%%\n", 
-                        (int)(rindex * 100. / num_pages), (long)parts, 
-                        ( int )( currentblocksperpart / ( parts - lastparts ) ),  
+                fprintf(stderr, "part blocks:%d%% parts:%ld bpp:%d current:%d%% total:%d%%\n",
+                        (int)(rindex * 100. / num_pages), (long)parts,
+                        (int)( currentblocksperpart / ( parts - lastparts ) ),
                         (int)(outsize * 100 / readin), (int)(total_out * 100 / total_in));
                 lastpercentage++;
                 lastparts = parts;
