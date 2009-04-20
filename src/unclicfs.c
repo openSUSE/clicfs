@@ -34,7 +34,7 @@ static size_t clic_read_block(unsigned char *buf, off_t block)
     off_t mapped_block = clic_map_block(block);
     assert(mapped_block < (off_t)num_pages);
 
-    off_t part = (off_t)(mapped_block * 4096 / bsize);
+    off_t part = (off_t)(mapped_block / bsize);
     assert(part < parts);
     if ( part != lastpart) {
 	size_t readin = clic_readpart(inbuf, part);
@@ -45,9 +45,9 @@ static size_t clic_read_block(unsigned char *buf, off_t block)
 	lastpart = part;
     }
 
-    memcpy(buf, outbuf + 4096 * (mapped_block % (bsize / 4096)), 4096);
+    memcpy(buf, outbuf + pagesize * (mapped_block % bsize), pagesize);
 
-    return 4096;
+    return pagesize;
 }
 
 int main(int argc, char *argv[])
@@ -60,15 +60,15 @@ int main(int argc, char *argv[])
     if (clicfs_read_pack(packfilename))
       return 1;
 
-    inbuf = malloc(bsize + 300);
-    outbuf = malloc(bsize + 300);
+    inbuf = malloc(bsize*pagesize + 300);
+    outbuf = malloc(bsize*pagesize);
 
     FILE *outfile = fopen(thefile, "w");
 
     size_t delta = num_pages / 100;
 
     size_t i;
-    unsigned char tbuf[4096];
+    unsigned char tbuf[pagesize];
     for (i = 0; i < num_pages; ++i)
     {
       size_t diff = clic_read_block(tbuf, i);
@@ -76,8 +76,8 @@ int main(int argc, char *argv[])
 	{
 	  fprintf(stderr, "read %d%%\n", (int)(i * 100 / num_pages));
 	}
-      assert(diff == 4096);
-      if (fwrite(tbuf, 1, 4096, outfile) != 4096) {
+      assert(diff == pagesize);
+      if (fwrite(tbuf, 1, pagesize, outfile) != pagesize) {
 	perror("write");
         break;
       }

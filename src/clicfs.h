@@ -30,6 +30,7 @@ extern int cowfilefd;
 
 extern char thefile[PATH_MAX];
 extern size_t thefilesize;
+extern size_t pagesize;
 extern uint64_t *sizes;
 extern uint64_t *offs;
 extern uint32_t parts;

@@ -62,20 +62,20 @@ static int clic_write_cow()
 	//fprintf(stderr, "ptr %ld %d\n", (long)i, (int)(ptr & 0x3));
 	if (ptr && (ptr & 0x3) == 0) { // detached now
 	    uint32_t cowindex = clic_find_next_cow();
-	    lseek(cowfilefd, cowindex * 4096, SEEK_SET);
-	    write(cowfilefd, blockmap[i], 4096);
+	    lseek(cowfilefd, cowindex * pagesize, SEEK_SET);
+	    write(cowfilefd, blockmap[i], pagesize);
 	    free(blockmap[i]);
 	    detached_allocated -= 4;
 	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
 	}
     }
 
-    lseek(cowfilefd, cow_pages * 4096, SEEK_SET);
+    lseek(cowfilefd, cow_pages * pagesize, SEEK_SET);
     uint32_t stringlen = thefilesize;
     write(cowfilefd, (char*)&stringlen, sizeof(uint32_t));
     stringlen = cow_pages;
     write(cowfilefd, (char*)&stringlen, sizeof(uint32_t));
-    lseek(cowfilefd, cow_pages * 4096 + sizeof(uint32_t) * 2, SEEK_SET);
+    lseek(cowfilefd, cow_pages * pagesize + sizeof(uint32_t) * 2, SEEK_SET);
     stringlen = 0;
     for (i = 0; i < num_pages; ++i)
     {
@@ -273,7 +273,7 @@ static int clic_detach(size_t block)
 		clic_write_cow();
 	}
 
-	char *newptr = malloc(4096);
+	char *newptr = malloc(pagesize);
 	detached_allocated += 4;
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 
@@ -287,11 +287,11 @@ static int clic_detach(size_t block)
 
     if (!blockmap[block])
     {
-	blockmap[block] = malloc(4096);
+	blockmap[block] = malloc(pagesize);
 	assert(((long)ptr & 0x3) == 0);
 	detached_allocated += 4;
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
-	memset(blockmap[block],0,4096);
+	memset(blockmap[block],0,pagesize);
 	return 1;
     }
 
@@ -317,18 +317,18 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
         return 0;
     }
 
-    off_t block = offset / 4096;
-    off_t ioff = offset - block * 4096;
+    off_t block = offset / pagesize;
+    off_t ioff = offset - block * pagesize;
 
-    assert(ioff == 0 || ioff + size <= 4096);
+    assert(ioff == 0 || ioff + size <= pagesize);
 
-    if (size <= 4096) {
+    if (size <= pagesize) {
 	return clic_write_block(buf+ioff, block, size);
     } else {
 	size_t wrote = 0;
 	do
 	{
-	    size_t diff = clic_write_block(buf, block, size > 4096 ? 4096 : size);
+	    size_t diff = clic_write_block(buf, block, size > pagesize ? pagesize : size);
 	    size -= diff;
 	    buf += diff;
 	    block++;
@@ -348,20 +348,20 @@ static size_t clic_read_block(char *buf, size_t block)
     clic_log_access(block);
 
     if (!blockmap[block]) { // sparse block 
-        memset(buf, 0, 4096);
-        return 4096;
+        memset(buf, 0, pagesize);
+        return pagesize;
     }
 
     long ptr = (long)blockmap[block];
     if ((ptr & 0x3) == 0) {
 	// detached
-	memcpy(buf, blockmap[block], 4096);
-	return 4096;
+	memcpy(buf, blockmap[block], pagesize);
+	return pagesize;
     }
 
     if ((ptr & 0x3) == 2) {
-	lseek(cowfilefd, (ptr >> 2) * 4096, SEEK_SET);
-	return read(cowfilefd, buf, 4096);
+	lseek(cowfilefd, (ptr >> 2) * pagesize, SEEK_SET);
+	return read(cowfilefd, buf, pagesize);
     }
 
     assert((ptr & 0x3) == 1); // in read only part
@@ -369,14 +369,14 @@ static size_t clic_read_block(char *buf, size_t block)
 
     off_t mapped_block = clic_map_block(block);
 
-    size_t part = (size_t)(mapped_block * 4096 / bsize);
+    size_t part = (size_t)(mapped_block * pagesize / bsize);
     assert(part < parts);
 
     const unsigned char *partbuf = clic_uncompress(part);
     assert(partbuf);
-    memcpy(buf, partbuf + 4096 * (mapped_block % (bsize / 4096)), 4096);
+    memcpy(buf, partbuf + pagesize * (mapped_block % (bsize / pagesize)), pagesize);
 
-    return 4096;
+    return pagesize;
 }
 
 static int clic_read(const char *path, char *buf, size_t size, off_t offset,
@@ -389,14 +389,14 @@ static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 
     size_t readtotal = 0;
 
-    assert(size % 4096 == 0);
-    assert(offset % 4096 == 0);
+    assert(size % pagesize == 0);
+    assert(offset % pagesize == 0);
 
     do
     {
 	if (offset >= (off_t)thefilesize)
 		break;
-	size_t diff = clic_read_block(buf, offset / 4096);
+	size_t diff = clic_read_block(buf, offset / pagesize);
 	if (!diff)
 	  break;
 	size -= diff;
@@ -533,7 +533,7 @@ int main(int argc, char *argv[])
     if (cowfilename) {
 	if (access(cowfilename, W_OK)) {
 	    FILE *cow = fopen(cowfilename, "w");
-	    uint32_t stringlen = (thefilesize / 4096 * 4096) + 512 * 1024 * 1024;
+	    uint32_t stringlen = (thefilesize / pagesize * pagesize) + 512 * 1024 * 1024;
 	    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
 	    stringlen = 0;
 	    // there are 0 blocks
@@ -549,8 +549,8 @@ int main(int argc, char *argv[])
 
     // fake for write
     if (sparse_memory) {
-      thefilesize = (thefilesize / 4096 * 4096) + sparse_memory * 1024 * 1024;
-      write_pages = thefilesize / 4096;
+      thefilesize = (thefilesize / pagesize * pagesize) + sparse_memory * 1024 * 1024;
+      write_pages = thefilesize / pagesize;
       blockmap = realloc(blockmap, sizeof(unsigned char*)*write_pages);
     } else
       write_pages = num_pages;

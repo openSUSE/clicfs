@@ -34,6 +34,7 @@ int cowfilefd = -1;
 
 char thefile[PATH_MAX];
 size_t thefilesize = 0;
+size_t pagesize = 4096;
 uint64_t *sizes = 0;
 uint64_t *offs = 0;
 uint32_t parts = 0;
@@ -78,7 +79,7 @@ int clicfs_read_cow(const char *cowfilename)
     if (lseek(cowfilefd, st.st_size - indexlen, SEEK_SET ) == -1)
 	perror("seek");
     thefilesize = clic_readindex_fd(cowfilefd);
-    uint32_t newpages = thefilesize / 4096;
+    uint32_t newpages = thefilesize / pagesize;
     blockmap = realloc(blockmap, sizeof(unsigned char*)*newpages);
     uint32_t i;
     for (i = num_pages; i < newpages; ++i)
@@ -127,7 +128,8 @@ int clicfs_read_pack(const char *packfilename)
 
     size_t oparts = clic_readindex_file(packfile);
     bsize = clic_readindex_file(packfile);
-    thefilesize = clic_readindex_file(packfile);
+    pagesize = clic_readindex_file(packfile);
+    thefilesize = oparts * bsize * pagesize;
     preset = clic_readindex_file(packfile);
     num_pages = clic_readindex_file(packfile);
     blockmap = malloc(sizeof(unsigned char*)*num_pages);
@@ -197,7 +199,7 @@ void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t re
     strm.next_in = in;
     strm.avail_in = readin;
     strm.next_out = out;
-    strm.avail_out = bsize;
+    strm.avail_out = bsize*pagesize;
 
     while (1) {
 	ret = lzma_code(&strm, LZMA_RUN);
