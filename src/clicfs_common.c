@@ -104,11 +104,11 @@ int clicfs_read_pack(const char *packfilename)
         fprintf(stderr, "packfile %s can't be opened\n", packfilename);
         return 1;
     }
-    char head[5];
-    char expected[5];
-    fread(head, 1, 4, packfile);
-    head[4] = 0;
-    sprintf(expected, "SK%02d", DOENER_MAGIC);
+    char head[7];
+    char expected[7];
+    fread(head, 1, 6, packfile);
+    head[6] = 0;
+    sprintf(expected, "CLIC%02d", DOENER_MAGIC);
     if (strcmp(head,expected)) {
 	fprintf(stderr, "wrong magic: %s vs %s\n", head, expected);
 	return 1;

@@ -159,11 +159,11 @@ int main(int argc, char **argv)
     uint64_t *sizes = ( uint64_t* )malloc(sizeof(uint64_t)*oparts);
     uint64_t *offs = ( uint64_t* )malloc(sizeof(uint64_t)*oparts);
 
-    off_t index_off = 4;
+    off_t index_off = 6;
     int lastpercentage = 0;
 
     assert( DOENER_MAGIC < 100 );
-    fprintf(out, "SK%02d", DOENER_MAGIC );
+    fprintf(out, "CLIC%02d", DOENER_MAGIC );
 
     char fname[PATH_MAX];
     strcpy(fname, basename(infile));
