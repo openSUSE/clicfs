@@ -46,6 +46,8 @@ uint32_t cow_pages = 0;
 uint32_t *cows = 0;
 unsigned int cows_index = 0;
 
+static lzma_stream strm;
+
 uint32_t clic_readindex_fd(int fd)
 {
     uint32_t stringlen = 0;
@@ -154,12 +156,25 @@ int clicfs_read_pack(const char *packfilename)
         }
 	if (fread((char*)(offs + i), sizeof(uint64_t), 1, packfile) != 1)
 		parts = 0;
+	if (i > 0 && offs[i] <= offs[i-1]) {
+	  fprintf(stderr, "the offset for i is not larger than i-1: %ld\n", (long)i);
+	  return 1;
+	}
     }
     if (parts == 0) {
         fprintf(stderr, "unreasonable part number 0\n");
 	return 1;
     }
     fseek(packfile, (oparts-parts)*sizeof(uint64_t)*2, SEEK_CUR);
+
+    const uint32_t flags = LZMA_TELL_UNSUPPORTED_CHECK | LZMA_CONCATENATED;
+    // C sucks
+    lzma_stream tmp = LZMA_STREAM_INIT;
+    strm = tmp;
+    lzma_ret ret = lzma_auto_decoder(&strm, lzma_easy_decoder_memusage(preset), flags);
+    if (ret != LZMA_OK) {
+      return 1;
+    }
 
     return 0;
 }
@@ -180,7 +195,7 @@ size_t clic_readpart(unsigned char *buffer, int part)
 	return 0;
     }
 #if defined(DEBUG)
-    fprintf(logger, "uncompress part=%d/%d com=%d off=%ld size=%ld ioff=%ld size=%ld\n", part, parts, com->index, offs[part], sizes[part], ioff, size );
+    fprintf(stderr, "uncompress part=%d/%d off=%ld size=%ld\n", part, parts, offs[part], sizes[part] );
 #endif
     size_t readin = fread(buffer, 1, sizes[part], packfile);
     if (readin != sizes[part]) {
@@ -191,23 +206,21 @@ size_t clic_readpart(unsigned char *buffer, int part)
 
 void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t readin)
 {
-    const uint32_t flags = LZMA_TELL_UNSUPPORTED_CHECK | LZMA_CONCATENATED;
-    lzma_stream strm = LZMA_STREAM_INIT;
-
-    lzma_ret ret = lzma_auto_decoder(&strm, lzma_easy_decoder_memusage(preset), flags); 
-
     strm.next_in = in;
     strm.avail_in = readin;
     strm.next_out = out;
     strm.avail_out = bsize*pagesize;
 
+    lzma_ret ret;
     while (1) {
 	ret = lzma_code(&strm, LZMA_RUN);
-//	fprintf(logger, "ret %d\n", ret);
+	//fprintf(stderr, "ret %d %ld %ld\n", ret, strm.avail_in, strm.avail_out );
 	if (ret != LZMA_OK)
 	    break;
+	if (!strm.avail_in && !strm.avail_out)
+	  break;
     }
 
-    //assert (ret == LZMA_OK);
-    lzma_end(&strm);
+    assert (ret == LZMA_OK);
+    /* don't use lzma_end (will free buffers) or LZMA_FINISH (will forbid any new use) */
 }

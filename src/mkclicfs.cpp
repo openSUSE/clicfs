@@ -90,7 +90,7 @@ int main(int argc, char **argv)
 {
     bool check_dups = true;
     int blocksize = 32;
-    int pagesize = pagesize;
+    int pagesize = 4096;
     const char *profile = 0;
     int preset = 2;
     bool usage = false;
@@ -181,6 +181,10 @@ int main(int argc, char **argv)
 
     int infd = open(infile, O_RDONLY);
     FILE *out = fopen(outfile, "w");
+    if (!out) {
+        perror("open output");
+        return 1;
+    }
 
     unsigned char inbuf[blocksize*pagesize];
     unsigned char outbuf[blocksize*pagesize + 300];
@@ -243,7 +247,7 @@ int main(int argc, char **argv)
 
     while ( rindex < num_pages )
         {
-            uint32_t currentblocks = 0;
+            int currentblocks = 0;
             size_t readin = 0;
 
             while ( currentblocks < blocksize )

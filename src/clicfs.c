@@ -65,7 +65,7 @@ static int clic_write_cow()
 	    lseek(cowfilefd, cowindex * pagesize, SEEK_SET);
 	    write(cowfilefd, blockmap[i], pagesize);
 	    free(blockmap[i]);
-	    detached_allocated -= 4;
+	    detached_allocated -= (pagesize / 1024);
 	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
 	}
     }
@@ -221,7 +221,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
     gettimeofday(&end, 0);
 
 #if defined(DEBUG)
-      if (logger) fprintf(logger, "uncompress %d %d %ld %ld (read took %ld - started %ld)\n", part, com->index, (long)offs[part], (long)sizes[part], (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
+    if (logger) fprintf(logger, "uncompress %d %d %ld %ld (read took %ld - started %ld)\n", part, com->index, (long)offs[part], (long)sizes[part], (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
 #endif
     if (!readin)
       return 0;
@@ -274,7 +274,7 @@ static int clic_detach(size_t block)
 	}
 
 	char *newptr = malloc(pagesize);
-	detached_allocated += 4;
+	detached_allocated += (pagesize / 1024);
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 
 	clic_read_block(newptr, block);
@@ -289,7 +289,7 @@ static int clic_detach(size_t block)
     {
 	blockmap[block] = malloc(pagesize);
 	assert(((long)ptr & 0x3) == 0);
-	detached_allocated += 4;
+	detached_allocated += (pagesize / 1024);
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 	memset(blockmap[block],0,pagesize);
 	return 1;
@@ -369,12 +369,12 @@ static size_t clic_read_block(char *buf, size_t block)
 
     off_t mapped_block = clic_map_block(block);
 
-    size_t part = (size_t)(mapped_block * pagesize / bsize);
+    size_t part = (size_t)(mapped_block / bsize);
     assert(part < parts);
 
     const unsigned char *partbuf = clic_uncompress(part);
     assert(partbuf);
-    memcpy(buf, partbuf + pagesize * (mapped_block % (bsize / pagesize)), pagesize);
+    memcpy(buf, partbuf + pagesize * (mapped_block % bsize), pagesize);
 
     return pagesize;
 }
@@ -382,7 +382,7 @@ static size_t clic_read_block(char *buf, size_t block)
 static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
-    //fprintf(stdout, "read %ld %ld %ld\n", offset, size, thefilesize);
+    // fprintf(stdout, "read %ld %ld %ld\n", offset, size, thefilesize);
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
@@ -446,7 +446,7 @@ static void clic_init_buffer(int i)
     coms[i].used = 0;
     coms[i].index = i + 1;
     coms[i].free = 1;
-    coms[i].out_buffer = malloc(bsize);
+    coms[i].out_buffer = malloc(bsize*pagesize);
     pthread_mutex_init(&coms[i].lock, 0);
 }
 
@@ -560,7 +560,7 @@ int main(int argc, char *argv[])
     for (i = num_pages; i < write_pages; ++i)
 	blockmap[i] = 0;
 
-    com_count = 6000000 / bsize; // get 6MB of cache
+    com_count = 6000000 / (bsize*pagesize); // get 6MB of cache
     coms = malloc(sizeof(struct buffer_combo) * com_count);
     for (i = 0; i < com_count; ++i)
 	clic_init_buffer(i);
