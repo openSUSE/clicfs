@@ -1,22 +1,21 @@
-/* -*- c-file-style: "java"; indent-tabs-mode: nil; fill-column: 78; tab-width: 4 -*-
- *
- * This file is part of Clic FS
- * Copyright (C) 2009 Stephan Kulow (coolo@suse.de)
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public License
- * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+/* -*- c-file-style: "java"; indent-tabs-mode: nil; fill-column: 78; tab-width: 4 -*- */
+
+/* This file is part of Clic FS
+   Copyright (C) 2009 Stephan Kulow (coolo@suse.de)
+
+   Clicfs is free software; you can redistribute it and/or
+   modify it under the terms of the GNU General Public
+   License as published by the Free Software Foundation, version 2.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+   02110-1301, USA
 */
 
 //#define _GNU_SOURCE
@@ -40,7 +39,7 @@ static std::string calc_md5( unsigned char *d, size_t n )
 {
     unsigned char md5[20];
     char md5s[33];
-    
+
     MD5(d, n, md5);
     int j;
     for (j = 0; j < 16; ++j)
@@ -124,13 +123,13 @@ int main(int argc, char **argv)
             break;
         }
     }
-    
+
     if (argc != optind + 2 || usage) {
         fprintf(stderr, "Usage: %s [-b <blocks>] [-p <pagesize>] [-d] [-c <preset>] [-l <logfile>] <infile> <outfile>\n",
                 argv[0]);
         return EXIT_FAILURE;
     }
-    
+
     const char *infile = argv[optind++];
     const char *outfile = argv[optind++];
 
@@ -268,7 +267,7 @@ int main(int argc, char **argv)
                     }
                     size_t diff= read( infd, inbuf+readin, pagesize);
                     std::string sm;
-                    if (check_dups) 
+                    if (check_dups)
                         sm = calc_md5( inbuf+readin, diff );
                     if ( check_dups && dups.find( sm ) != dups.end() ) {
                         //fprintf( stderr, "already have %s\n", sm.c_str() );
@@ -311,7 +310,7 @@ int main(int argc, char **argv)
     }
 
     for (i = 0; i < num_pages; ++i)
-        if (!writeindex(out, blockmap[i])) 
+        if (!writeindex(out, blockmap[i]))
             return 1;
 
     if (fseek(out, index_part, SEEK_SET) < 0) {
@@ -321,7 +320,7 @@ int main(int argc, char **argv)
     if (!writeindex(out, parts)) return 1;
 
     for (i = 0; i < parts; ++i) {
-        if (fwrite((char*)(sizes + i), sizeof(uint64_t), 1, out) != 1 || 
+        if (fwrite((char*)(sizes + i), sizeof(uint64_t), 1, out) != 1 ||
             fwrite((char*)(offs + i), sizeof(uint64_t), 1, out) != 1) {
             perror("write"); return 1;
         }
