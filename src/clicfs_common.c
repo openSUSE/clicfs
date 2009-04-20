@@ -210,6 +210,8 @@ void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t re
     strm.avail_in = readin;
     strm.next_out = out;
     strm.avail_out = bsize*pagesize;
+    strm.total_in = 0;
+    strm.total_out = 0;
 
     lzma_ret ret;
     while (1) {
@@ -217,7 +219,7 @@ void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t re
 	//fprintf(stderr, "ret %d %ld %ld\n", ret, strm.avail_in, strm.avail_out );
 	if (ret != LZMA_OK)
 	    break;
-	if (!strm.avail_in && !strm.avail_out)
+	if (!strm.avail_in)
 	  break;
     }
 
