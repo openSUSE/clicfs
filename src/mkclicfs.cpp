@@ -357,7 +357,7 @@ void initialise_threads()
             exit( 1 );
 }
 
-int writer(size_t oparts, off_t index_off, FILE *out, size_t *sizes, uint64_t *offs, size_t full_size)
+int writer(size_t oparts, off_t index_off, FILE *out, uint64_t *sizes, uint64_t *offs, size_t full_size)
 {
     int oldstate;
 
