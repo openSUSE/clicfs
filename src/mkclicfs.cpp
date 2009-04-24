@@ -115,8 +115,7 @@ struct queue {
 };
 
 static struct queue *from_reader, *to_writer;
-static pthread_t *thread, *deflator_thread, *frag_deflator_thread, progress_thread;
-static pthread_cond_t progress_wait;
+static pthread_t *thread;
 
 static int processors = -1;
 
@@ -198,7 +197,6 @@ void *reader(void *arg)
     std::map<std::string,uint32_t> dups;
 
     uint32_t currentblocksperpart = 0; // for debug output
-    uint32_t lastparts = 0; // for debug output
 
     uint32_t usedblock = 0; // overall "mapped" index
 
@@ -285,7 +283,6 @@ void *deflator(void *arg)
 
         while(1) {
             inbuf_struct *in = (inbuf_struct*)queue_get(from_reader);
-            struct file_buffer *write_buffer;
 
             outbuf_struct *out = new outbuf_struct();
             out->outbuf = new unsigned char[blocksize*pagesize + 300];
@@ -302,6 +299,8 @@ void *deflator(void *arg)
 
             queue_put(to_writer, out);
         }
+
+    return 0;
 }
 
 void initialise_threads()
@@ -338,8 +337,6 @@ void initialise_threads()
 
         if((thread = (pthread_t*)malloc((2 + processors * 2) * sizeof(pthread_t))) == NULL)
             exit( 1 );
-        deflator_thread = &thread[2];
-        frag_deflator_thread = &deflator_thread[processors];
 
         size_t reader_buffer_size = 64;
         size_t writer_buffer_size = 512;
@@ -349,7 +346,7 @@ void initialise_threads()
         pthread_create(&thread[0], NULL, reader, NULL);
 
         for(i = 0; i < processors; i++) {
-                if(pthread_create(&deflator_thread[i], NULL, deflator, NULL) != 0 )
+                if(pthread_create(&thread[2+i], NULL, deflator, NULL) != 0 )
                     exit( 1 );
         }
 
@@ -362,7 +359,6 @@ void initialise_threads()
 
 int writer(size_t oparts, off_t index_off, FILE *out, size_t *sizes, uint64_t *offs, size_t full_size)
 {
-    int write_error = false;
     int oldstate;
 
     uint64_t total_in = 0;
