@@ -85,6 +85,96 @@ static size_t compress(int preset, unsigned char *in, size_t insize, unsigned ch
     return strm.total_out;
 }
 
+/* most of this logic is from mksquashfs - GPLv2+ */
+
+/* struct describing queues used to pass data between threads */
+struct queue {
+        int                     size;
+        int                     readp;
+        int                     writep;
+        pthread_mutex_t         mutex;
+        pthread_cond_t          empty;
+        pthread_cond_t          full;
+        void                    **data;
+};
+
+struct cache *reader_buffer, *writer_buffer, *fragment_buffer;
+struct queue *to_reader, *from_reader, *to_writer, *from_writer, *from_deflate, *to_frag;
+pthread_t *thread, *deflator_thread, *frag_deflator_thread, progress_thread;
+pthread_mutex_t fragment_mutex;
+pthread_cond_t fragment_waiting;
+pthread_mutex_t pos_mutex;
+pthread_mutex_t progress_mutex;
+pthread_cond_t progress_wait;
+
+void initialise_threads()
+{
+        int i;
+        sigset_t sigmask, old_mask;
+
+        sigemptyset(&sigmask);
+        sigaddset(&sigmask, SIGINT);
+        sigaddset(&sigmask, SIGQUIT);
+        if(sigprocmask(SIG_BLOCK, &sigmask, &old_mask) == -1)
+                BAD_ERROR("Failed to set signal mask in intialise_threads\n");
+
+        signal(SIGUSR1, sigusr1_handler);
+
+        if(processors == -1) {
+#ifndef linux
+                int mib[2];
+                size_t len = sizeof(processors);
+
+                mib[0] = CTL_HW;
+#ifdef HW_AVAILCPU
+                mib[1] = HW_AVAILCPU;
+#else
+                mib[1] = HW_NCPU;
+#endif
+
+                if(sysctl(mib, 2, &processors, &len, NULL, 0) == -1) {
+                        ERROR("Failed to get number of available processors.  Defaulting to 1\n");
+                        processors = 1;
+                }
+#else
+                processors = get_nprocs();
+#endif
+        }
+
+        if((thread = malloc((2 + processors * 2) * sizeof(pthread_t))) == NULL)
+                BAD_ERROR("Out of memory allocating thread descriptors\n");
+        deflator_thread = &thread[2];
+        frag_deflator_thread = &deflator_thread[processors];
+
+        to_reader = queue_init(1);
+        from_reader = queue_init(reader_buffer_size);
+        to_writer = queue_init(writer_buffer_size);
+        from_writer = queue_init(1);
+        from_deflate = queue_init(reader_buffer_size);
+        to_frag = queue_init(fragment_buffer_size);
+        reader_buffer = cache_init(block_size, reader_buffer_size);
+        writer_buffer = cache_init(block_size, writer_buffer_size);
+        fragment_buffer = cache_init(block_size, fragment_buffer_size);
+        pthread_create(&thread[0], NULL, reader, NULL);
+        pthread_create(&thread[1], NULL, writer, NULL);
+        pthread_create(&progress_thread, NULL, progress_thrd, NULL);
+        pthread_mutex_init(&fragment_mutex, NULL);
+        pthread_cond_init(&fragment_waiting, NULL);
+
+        for(i = 0; i < processors; i++) {
+                if(pthread_create(&deflator_thread[i], NULL, deflator, NULL) != 0 )
+                        BAD_ERROR("Failed to create thread\n");
+                if(pthread_create(&frag_deflator_thread[i], NULL, frag_deflator, NULL) != 0)
+                        BAD_ERROR("Failed to create thread\n");
+        }
+
+        printf("Parallel mksquashfs: Using %d processor%s\n", processors,
+                        processors == 1 ? "" : "s");
+
+        if(sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1)
+                BAD_ERROR("Failed to set signal mask in intialise_threads\n");
+}
+
 int main(int argc, char **argv)
 {
     bool check_dups = true;
