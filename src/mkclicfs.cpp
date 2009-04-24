@@ -30,6 +30,11 @@
 #include <lzma.h>
 #include <limits.h>
 #include <fcntl.h>
+#include <sys/sysinfo.h>
+#include <signal.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <pthread.h>
 
 #include <openssl/md5.h>
 #include <map>
@@ -107,6 +112,141 @@ pthread_mutex_t pos_mutex;
 pthread_mutex_t progress_mutex;
 pthread_cond_t progress_wait;
 
+static int processors;
+
+#define BAD_ERROR(s, args...)   do {\
+                                        pthread_mutex_lock(&progress_mutex); \
+                                        fprintf(stderr, "FATAL ERROR:" s, ##args);\
+                                        pthread_mutex_unlock(&progress_mutex); \
+                                        exit(1); \
+                                } while(0)
+
+struct queue *queue_init(int size)
+{
+        struct queue *queue = (struct queue*)malloc(sizeof(struct queue));
+
+        if(queue == NULL)
+                return NULL;
+
+        if((queue->data = (void**)malloc(sizeof(void *) * (size + 1))) == NULL) {
+                free(queue);
+                return NULL;
+        }
+
+        queue->size = size + 1;
+        queue->readp = queue->writep = 0;
+        pthread_mutex_init(&queue->mutex, NULL);
+        pthread_cond_init(&queue->empty, NULL);
+        pthread_cond_init(&queue->full, NULL);
+
+        return queue;
+}
+
+
+void queue_put(struct queue *queue, void *data)
+{
+        int nextp;
+
+        pthread_mutex_lock(&queue->mutex);
+
+        while((nextp = (queue->writep + 1) % queue->size) == queue->readp)
+                pthread_cond_wait(&queue->full, &queue->mutex);
+
+        queue->data[queue->writep] = data;
+        queue->writep = nextp;
+        pthread_cond_signal(&queue->empty);
+        pthread_mutex_unlock(&queue->mutex);
+}
+
+
+void *queue_get(struct queue *queue)
+{
+        void *data;
+        pthread_mutex_lock(&queue->mutex);
+
+        while(queue->readp == queue->writep)
+                pthread_cond_wait(&queue->empty, &queue->mutex);
+
+        data = queue->data[queue->readp];
+        queue->readp = (queue->readp + 1) % queue->size;
+        pthread_cond_signal(&queue->full);
+        pthread_mutex_unlock(&queue->mutex);
+
+        return data;
+}
+
+void *progress_thrd(void *arg)
+{
+	struct timeval timeval;
+        struct winsize winsize;
+        int columns;
+        struct timespec timespec;
+
+        if(ioctl(1, TIOCGWINSZ, &winsize) == -1) {
+                printf("TIOCGWINZ ioctl failed, defaulting to 80 columns\n");
+                columns = 80;
+        } else 
+                columns = winsize.ws_col;
+
+        pthread_cond_init(&progress_wait, NULL);
+
+        pthread_mutex_lock(&progress_mutex);
+
+        while(1) {
+                gettimeofday(&timeval, NULL);
+                timespec.tv_sec = timeval.tv_sec;
+                if(timeval.tv_usec + 250000 > 999999)
+                        timespec.tv_sec++;
+                timespec.tv_nsec = ((timeval.tv_usec + 250000) % 1000000) * 1000;
+                pthread_cond_timedwait(&progress_wait, &progress_mutex, &timespec);
+                //progress_bar(cur_uncompressed, estimated_uncompressed, columns);
+        }
+}
+
+void *reader(void *arg)
+{
+        int oldstate;
+
+        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
+        pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldstate);
+
+        queue_get(to_reader);
+        thread[0] = 0;
+
+        pthread_exit(NULL);
+}
+
+
+void *writer(void *arg)
+{
+        int write_error = false;
+        int oldstate;
+
+        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
+        pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldstate);
+
+        while(1) {
+                struct file_buffer *file_buffer = (struct file_buffer*)queue_get(to_writer);
+                off_t off;
+        }
+}
+
+void *deflator(void *arg)
+{
+        int oldstate;
+
+        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
+        pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldstate);
+
+        while(1) {
+                struct file_buffer *file_buffer = (struct file_buffer*)queue_get(from_reader);
+                struct file_buffer *write_buffer;
+
+                write_buffer = 0; // writer_buffer, 0, 0);
+                queue_put(from_deflate, write_buffer);
+        }
+}
+
 void initialise_threads()
 {
         int i;
@@ -115,10 +255,8 @@ void initialise_threads()
         sigemptyset(&sigmask);
         sigaddset(&sigmask, SIGINT);
         sigaddset(&sigmask, SIGQUIT);
-        if(sigprocmask(SIG_BLOCK, &sigmask, &old_mask) == -1)
+        if(sigprocmask(SIG_BLOCK, &sigmask, &old_mask) == -1) 
                 BAD_ERROR("Failed to set signal mask in intialise_threads\n");
-
-        signal(SIGUSR1, sigusr1_handler);
 
         if(processors == -1) {
 #ifndef linux
@@ -141,30 +279,25 @@ void initialise_threads()
 #endif
         }
 
-        if((thread = malloc((2 + processors * 2) * sizeof(pthread_t))) == NULL)
+        if((thread = (pthread_t*)malloc((2 + processors * 2) * sizeof(pthread_t))) == NULL)
                 BAD_ERROR("Out of memory allocating thread descriptors\n");
         deflator_thread = &thread[2];
         frag_deflator_thread = &deflator_thread[processors];
+
+        size_t reader_buffer_size = 64;
+        size_t writer_buffer_size = 512;
 
         to_reader = queue_init(1);
         from_reader = queue_init(reader_buffer_size);
         to_writer = queue_init(writer_buffer_size);
         from_writer = queue_init(1);
         from_deflate = queue_init(reader_buffer_size);
-        to_frag = queue_init(fragment_buffer_size);
-        reader_buffer = cache_init(block_size, reader_buffer_size);
-        writer_buffer = cache_init(block_size, writer_buffer_size);
-        fragment_buffer = cache_init(block_size, fragment_buffer_size);
         pthread_create(&thread[0], NULL, reader, NULL);
         pthread_create(&thread[1], NULL, writer, NULL);
         pthread_create(&progress_thread, NULL, progress_thrd, NULL);
-        pthread_mutex_init(&fragment_mutex, NULL);
-        pthread_cond_init(&fragment_waiting, NULL);
 
         for(i = 0; i < processors; i++) {
                 if(pthread_create(&deflator_thread[i], NULL, deflator, NULL) != 0 )
-                        BAD_ERROR("Failed to create thread\n");
-                if(pthread_create(&frag_deflator_thread[i], NULL, frag_deflator, NULL) != 0)
                         BAD_ERROR("Failed to create thread\n");
         }
 
