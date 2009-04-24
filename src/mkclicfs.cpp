@@ -308,6 +308,10 @@ struct outbuf_struct
     size_t insize, outsize;
     size_t part, bpp;
     bool lastblock;
+
+    ~outbuf_struct() {
+        delete [] outbuf;
+    }
 };
 
 void *deflator(void *arg)
@@ -394,6 +398,49 @@ void initialise_threads()
 
         if(sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1)
                 BAD_ERROR("Failed to set signal mask in intialise_threads\n");
+}
+
+int writer(size_t oparts, off_t index_off, FILE *out, size_t *sizes, uint64_t *offs)
+{
+    int write_error = false;
+    int oldstate;
+
+    uint64_t total_in = 0;
+    uint64_t total_out = 0;
+
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldstate);
+
+    outbuf_struct **comps = new outbuf_struct*[oparts];
+    memset( comps, 0, sizeof( void* )*oparts );
+    size_t lastpart = -1;
+
+    while(1) {
+        outbuf_struct *comp = (outbuf_struct*)queue_get(to_writer);
+        comps[comp->part] = comp;
+
+        while ( comps[lastpart + 1] ) {
+            comp = comps[++lastpart];
+
+            sizes[comp->part] = comp->outsize;
+            offs[comp->part] = total_out + index_off;
+            total_in += comp->insize;
+            total_out += comp->outsize;
+            if (fwrite(comp->outbuf, comp->outsize, 1, out) != 1) {
+                perror("write"); return 1;
+            }
+
+            fprintf( stderr,  "buffer %ld %ld %ld %ld %d %ld\n", comp->part, comp->insize, comp->outsize, comp->bpp, thread[0] == 0, comp->lastblock );
+
+            if ( !thread[0] && comp->lastblock ) {
+                delete comp;
+                return 0;
+            }
+            comps[comp->part] = 0;
+            delete comp;
+        }
+    }
+    return 0;
 }
 
 int main(int argc, char **argv)
@@ -491,9 +538,6 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    uint64_t total_in = 0;
-    uint64_t total_out = 0;
-
     uint64_t *sizes = ( uint64_t* )malloc(sizeof(uint64_t)*oparts);
     uint64_t *offs = ( uint64_t* )malloc(sizeof(uint64_t)*oparts);
 
@@ -536,28 +580,8 @@ int main(int argc, char **argv)
     fseek(out, index_off, SEEK_SET);
 
     initialise_threads();
-
-    int write_error = false;
-    int oldstate;
-
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldstate);
-
-    while(1) {
-        outbuf_struct *comp = (outbuf_struct*)queue_get(to_writer);
-
-        sizes[comp->part] = comp->outsize;
-        offs[comp->part] = total_out + index_off;
-        total_in += comp->insize;
-        total_out += comp->outsize;
-        if (fwrite(comp->outbuf, comp->outsize, 1, out) != 1) {
-            perror("write"); return 1;
-        }
-
-        fprintf( stderr,  "buffer %ld %ld %ld %ld %d %ld\n", comp->part, comp->insize, comp->outsize, comp->bpp, thread[0] == 0, comp->lastblock );
-        if ( !thread[0] && comp->lastblock )
-            break;
-    }
+    if ( writer(oparts, index_off, out, sizes, offs) )
+        return 1;
 
     if (fseek(out, index_blocks, SEEK_SET) < 0) {
         perror("seek"); return 1;
