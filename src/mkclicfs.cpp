@@ -114,23 +114,11 @@ struct queue {
         void                    **data;
 };
 
-struct cache *reader_buffer, *writer_buffer, *fragment_buffer;
-struct queue *to_reader, *from_reader, *to_writer, *from_writer, *from_deflate, *to_frag;
-pthread_t *thread, *deflator_thread, *frag_deflator_thread, progress_thread;
-pthread_mutex_t fragment_mutex;
-pthread_cond_t fragment_waiting;
-pthread_mutex_t pos_mutex;
-pthread_mutex_t progress_mutex;
-pthread_cond_t progress_wait;
+static struct queue *from_reader, *to_writer;
+static pthread_t *thread, *deflator_thread, *frag_deflator_thread, progress_thread;
+static pthread_cond_t progress_wait;
 
 static int processors = -1;
-
-#define BAD_ERROR(s, args...)   do {\
-                                        pthread_mutex_lock(&progress_mutex); \
-                                        fprintf(stderr, "FATAL ERROR:" s, ##args);\
-                                        pthread_mutex_unlock(&progress_mutex); \
-                                        exit(1); \
-                                } while(0)
 
 struct queue *queue_init(int size)
 {
@@ -186,39 +174,11 @@ void *queue_get(struct queue *queue)
         return data;
 }
 
-void *progress_thrd(void *arg)
-{
-	struct timeval timeval;
-    struct winsize winsize;
-        int columns;
-        struct timespec timespec;
-
-        if(ioctl(1, TIOCGWINSZ, &winsize) == -1) {
-                printf("TIOCGWINZ ioctl failed, defaulting to 80 columns\n");
-                columns = 80;
-        } else
-                columns = winsize.ws_col;
-
-        pthread_cond_init(&progress_wait, NULL);
-
-        pthread_mutex_lock(&progress_mutex);
-
-        while(1) {
-                gettimeofday(&timeval, NULL);
-                timespec.tv_sec = timeval.tv_sec;
-                if(timeval.tv_usec + 250000 > 999999)
-                        timespec.tv_sec++;
-                timespec.tv_nsec = ((timeval.tv_usec + 250000) % 1000000) * 1000;
-                pthread_cond_timedwait(&progress_wait, &progress_mutex, &timespec);
-                //progress_bar(cur_uncompressed, estimated_uncompressed, columns);
-        }
-}
-
 // the number of really saved parts
 uint32_t parts = 0;
 
 struct inbuf_struct {
-    size_t readin;
+    size_t readin, totalin;
     unsigned char *inbuf;
     size_t part, bpp;
     bool lastblock;
@@ -249,6 +209,7 @@ void *reader(void *arg)
         inbuf_struct *in = new inbuf_struct();
         in->inbuf = new unsigned char[blocksize*pagesize];
         in->readin = 0;
+        in->totalin = 0;
         in->lastblock = false;
 
         while ( currentblocks < blocksize ) {
@@ -267,6 +228,7 @@ void *reader(void *arg)
                 perror( "seek" ); exit( 1 );
             }
             size_t diff= read( infd, in->inbuf + in->readin, pagesize);
+            in->totalin += diff;
             std::string sm;
             if (check_dups)
                 sm = calc_md5( in->inbuf + in->readin, diff );
@@ -305,7 +267,7 @@ void *reader(void *arg)
 struct outbuf_struct
 {
     unsigned char *outbuf;
-    size_t insize, outsize;
+    size_t insize, outsize, totalin;
     size_t part, bpp;
     bool lastblock;
 
@@ -332,6 +294,7 @@ void *deflator(void *arg)
             out->insize = in->readin;
             out->bpp = in->bpp;
             out->lastblock = in->lastblock;
+            out->totalin = in->totalin;
 
             //fprintf( stderr,  "compress %x %ld -> %ld\n", in->inbuf, in->readin, out->outsize );
             delete in->inbuf;
@@ -350,7 +313,7 @@ void initialise_threads()
         sigaddset(&sigmask, SIGINT);
         sigaddset(&sigmask, SIGQUIT);
         if(sigprocmask(SIG_BLOCK, &sigmask, &old_mask) == -1)
-                BAD_ERROR("Failed to set signal mask in intialise_threads\n");
+            exit( 1 );
 
         if(processors == -1) {
 #ifndef linux
@@ -374,7 +337,7 @@ void initialise_threads()
         }
 
         if((thread = (pthread_t*)malloc((2 + processors * 2) * sizeof(pthread_t))) == NULL)
-                BAD_ERROR("Out of memory allocating thread descriptors\n");
+            exit( 1 );
         deflator_thread = &thread[2];
         frag_deflator_thread = &deflator_thread[processors];
 
@@ -383,24 +346,21 @@ void initialise_threads()
 
         from_reader = queue_init(reader_buffer_size);
         to_writer = queue_init(writer_buffer_size);
-        from_writer = queue_init(1);
-        from_deflate = queue_init(reader_buffer_size);
         pthread_create(&thread[0], NULL, reader, NULL);
-        //pthread_create(&progress_thread, NULL, progress_thrd, NULL);
 
         for(i = 0; i < processors; i++) {
                 if(pthread_create(&deflator_thread[i], NULL, deflator, NULL) != 0 )
-                        BAD_ERROR("Failed to create thread\n");
+                    exit( 1 );
         }
 
         fprintf(stderr,  "Parallel mksquashfs: Using %d processor%s\n", processors,
                         processors == 1 ? "" : "s");
 
         if(sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1)
-                BAD_ERROR("Failed to set signal mask in intialise_threads\n");
+            exit( 1 );
 }
 
-int writer(size_t oparts, off_t index_off, FILE *out, size_t *sizes, uint64_t *offs)
+int writer(size_t oparts, off_t index_off, FILE *out, size_t *sizes, uint64_t *offs, size_t full_size)
 {
     int write_error = false;
     int oldstate;
@@ -415,6 +375,8 @@ int writer(size_t oparts, off_t index_off, FILE *out, size_t *sizes, uint64_t *o
     memset( comps, 0, sizeof( void* )*oparts );
     size_t lastpart = -1;
 
+    int lastpercentage = 0;
+
     while(1) {
         outbuf_struct *comp = (outbuf_struct*)queue_get(to_writer);
         comps[comp->part] = comp;
@@ -424,13 +386,18 @@ int writer(size_t oparts, off_t index_off, FILE *out, size_t *sizes, uint64_t *o
 
             sizes[comp->part] = comp->outsize;
             offs[comp->part] = total_out + index_off;
-            total_in += comp->insize;
+            total_in += comp->totalin;
             total_out += comp->outsize;
             if (fwrite(comp->outbuf, comp->outsize, 1, out) != 1) {
                 perror("write"); return 1;
             }
 
-            fprintf( stderr,  "buffer %ld %ld %ld %ld %d %ld\n", comp->part, comp->insize, comp->outsize, comp->bpp, thread[0] == 0, comp->lastblock );
+            if ((int)(100 * total_in / full_size) > lastpercentage || comp->lastblock ) {
+                fprintf(stderr, "part blocks:%d%% parts:%ld total:%d%%\n",
+                        lastpercentage+1, (long)comp->part,
+                        (int)(total_out * 100 / total_in) );
+                lastpercentage++;
+            }
 
             if ( !thread[0] && comp->lastblock ) {
                 delete comp;
@@ -542,7 +509,6 @@ int main(int argc, char **argv)
     uint64_t *offs = ( uint64_t* )malloc(sizeof(uint64_t)*oparts);
 
     off_t index_off = 6;
-    int lastpercentage = 0;
 
     assert( DOENER_MAGIC < 100 );
     fprintf(out, "CLIC%02d", DOENER_MAGIC );
@@ -580,7 +546,7 @@ int main(int argc, char **argv)
     fseek(out, index_off, SEEK_SET);
 
     initialise_threads();
-    if ( writer(oparts, index_off, out, sizes, offs) )
+    if ( writer(oparts, index_off, out, sizes, offs, st.st_size) )
         return 1;
 
     if (fseek(out, index_blocks, SEEK_SET) < 0) {
