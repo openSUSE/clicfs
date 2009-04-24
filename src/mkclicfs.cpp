@@ -90,6 +90,17 @@ static size_t compress(int preset, unsigned char *in, size_t insize, unsigned ch
     return strm.total_out;
 }
 
+int blocksize = 32;
+int infd = -1;
+uint32_t *ublocks = 0;
+uint32_t *found = 0;
+bool check_dups = true;
+uint32_t *blockindex = 0;
+uint32_t num_pages = 0;
+size_t pagesize = 4096;
+uint32_t pindex = 0;
+int preset = 2;
+
 /* most of this logic is from mksquashfs - GPLv2+ */
 
 /* struct describing queues used to pass data between threads */
@@ -112,7 +123,7 @@ pthread_mutex_t pos_mutex;
 pthread_mutex_t progress_mutex;
 pthread_cond_t progress_wait;
 
-static int processors;
+static int processors = -1;
 
 #define BAD_ERROR(s, args...)   do {\
                                         pthread_mutex_lock(&progress_mutex); \
@@ -145,17 +156,17 @@ struct queue *queue_init(int size)
 
 void queue_put(struct queue *queue, void *data)
 {
-        int nextp;
+    int nextp;
 
-        pthread_mutex_lock(&queue->mutex);
+    pthread_mutex_lock(&queue->mutex);
 
-        while((nextp = (queue->writep + 1) % queue->size) == queue->readp)
-                pthread_cond_wait(&queue->full, &queue->mutex);
+    while((nextp = (queue->writep + 1) % queue->size) == queue->readp)
+        pthread_cond_wait(&queue->full, &queue->mutex);
 
-        queue->data[queue->writep] = data;
-        queue->writep = nextp;
-        pthread_cond_signal(&queue->empty);
-        pthread_mutex_unlock(&queue->mutex);
+    queue->data[queue->writep] = data;
+    queue->writep = nextp;
+    pthread_cond_signal(&queue->empty);
+    pthread_mutex_unlock(&queue->mutex);
 }
 
 
@@ -178,14 +189,14 @@ void *queue_get(struct queue *queue)
 void *progress_thrd(void *arg)
 {
 	struct timeval timeval;
-        struct winsize winsize;
+    struct winsize winsize;
         int columns;
         struct timespec timespec;
 
         if(ioctl(1, TIOCGWINSZ, &winsize) == -1) {
                 printf("TIOCGWINZ ioctl failed, defaulting to 80 columns\n");
                 columns = 80;
-        } else 
+        } else
                 columns = winsize.ws_col;
 
         pthread_cond_init(&progress_wait, NULL);
@@ -203,33 +214,101 @@ void *progress_thrd(void *arg)
         }
 }
 
+// the number of really saved parts
+uint32_t parts = 0;
+
+struct inbuf_struct {
+    size_t readin;
+    unsigned char *inbuf;
+    size_t part, bpp;
+    bool lastblock;
+};
+
+
 void *reader(void *arg)
 {
-        int oldstate;
+    int oldstate;
 
-        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
-        pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldstate);
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldstate);
 
-        queue_get(to_reader);
-        thread[0] = 0;
+    uint32_t rindex = 0; // overall index
+    uint32_t uindex = 0; // index for "unused" blocks
 
-        pthread_exit(NULL);
-}
+    std::map<std::string,uint32_t> dups;
 
+    uint32_t currentblocksperpart = 0; // for debug output
+    uint32_t lastparts = 0; // for debug output
 
-void *writer(void *arg)
-{
-        int write_error = false;
-        int oldstate;
+    uint32_t usedblock = 0; // overall "mapped" index
 
-        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
-        pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldstate);
+    while ( rindex < num_pages ) {
 
-        while(1) {
-                struct file_buffer *file_buffer = (struct file_buffer*)queue_get(to_writer);
-                off_t off;
+        int currentblocks = 0;
+
+        inbuf_struct *in = new inbuf_struct();
+        in->inbuf = new unsigned char[blocksize*pagesize];
+        in->readin = 0;
+        in->lastblock = false;
+
+        while ( currentblocks < blocksize ) {
+            off_t cindex = 0;
+            if (rindex < pindex) {
+                cindex = ublocks[rindex];
+            } else {
+                while (found[uindex] && uindex < num_pages)  uindex++;
+                assert( uindex < num_pages );
+                if ( uindex < num_pages ) {
+                    cindex = uindex;
+                    uindex++;
+                }
+            }
+            if ( lseek( infd, cindex * pagesize, SEEK_SET) == -1 ) {
+                perror( "seek" ); exit( 1 );
+            }
+            size_t diff= read( infd, in->inbuf + in->readin, pagesize);
+            std::string sm;
+            if (check_dups)
+                sm = calc_md5( in->inbuf + in->readin, diff );
+            //fprintf( stderr, "block %ld %s\n", ( long )cindex, sm.c_str() );
+            if ( check_dups && dups.find( sm ) != dups.end() ) {
+                //fprintf( stderr, "already have %s\n", sm.c_str() );
+                blockindex[cindex] = dups[sm];
+            } else {
+                blockindex[cindex] = usedblock++;
+                dups[sm] = blockindex[cindex];
+                in->readin += diff;
+                currentblocks++;
+            }
+            //fprintf(stderr, "block %ld in part %ld\n", cindex, parts);
+            rindex++;
+            currentblocksperpart++;
+            if ( rindex == num_pages ) {
+                in->lastblock = true;
+                break;
+            }
         }
+        in->part = parts++;
+        in->bpp = currentblocksperpart;
+        currentblocksperpart = 0;
+        queue_put( from_reader, in );
+
+    }
+    fprintf( stderr, "thread 0 is gone\n" );
+
+    thread[0] = 0;
+
+    pthread_exit(NULL);
 }
+
+
+struct outbuf_struct
+{
+    unsigned char *outbuf;
+    size_t insize, outsize;
+    size_t part, bpp;
+    bool lastblock;
+};
 
 void *deflator(void *arg)
 {
@@ -239,11 +318,22 @@ void *deflator(void *arg)
         pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldstate);
 
         while(1) {
-                struct file_buffer *file_buffer = (struct file_buffer*)queue_get(from_reader);
-                struct file_buffer *write_buffer;
+            inbuf_struct *in = (inbuf_struct*)queue_get(from_reader);
+            struct file_buffer *write_buffer;
 
-                write_buffer = 0; // writer_buffer, 0, 0);
-                queue_put(from_deflate, write_buffer);
+            outbuf_struct *out = new outbuf_struct();
+            out->outbuf = new unsigned char[blocksize*pagesize + 300];
+            out->outsize = compress(preset, in->inbuf, in->readin, out->outbuf, blocksize*pagesize + 300);
+            out->part = in->part;
+            out->insize = in->readin;
+            out->bpp = in->bpp;
+            out->lastblock = in->lastblock;
+
+            //fprintf( stderr,  "compress %x %ld -> %ld\n", in->inbuf, in->readin, out->outsize );
+            delete in->inbuf;
+            delete in;
+
+            queue_put(to_writer, out);
         }
 }
 
@@ -255,7 +345,7 @@ void initialise_threads()
         sigemptyset(&sigmask);
         sigaddset(&sigmask, SIGINT);
         sigaddset(&sigmask, SIGQUIT);
-        if(sigprocmask(SIG_BLOCK, &sigmask, &old_mask) == -1) 
+        if(sigprocmask(SIG_BLOCK, &sigmask, &old_mask) == -1)
                 BAD_ERROR("Failed to set signal mask in intialise_threads\n");
 
         if(processors == -1) {
@@ -287,21 +377,19 @@ void initialise_threads()
         size_t reader_buffer_size = 64;
         size_t writer_buffer_size = 512;
 
-        to_reader = queue_init(1);
         from_reader = queue_init(reader_buffer_size);
         to_writer = queue_init(writer_buffer_size);
         from_writer = queue_init(1);
         from_deflate = queue_init(reader_buffer_size);
         pthread_create(&thread[0], NULL, reader, NULL);
-        pthread_create(&thread[1], NULL, writer, NULL);
-        pthread_create(&progress_thread, NULL, progress_thrd, NULL);
+        //pthread_create(&progress_thread, NULL, progress_thrd, NULL);
 
         for(i = 0; i < processors; i++) {
                 if(pthread_create(&deflator_thread[i], NULL, deflator, NULL) != 0 )
                         BAD_ERROR("Failed to create thread\n");
         }
 
-        printf("Parallel mksquashfs: Using %d processor%s\n", processors,
+        fprintf(stderr,  "Parallel mksquashfs: Using %d processor%s\n", processors,
                         processors == 1 ? "" : "s");
 
         if(sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1)
@@ -310,11 +398,7 @@ void initialise_threads()
 
 int main(int argc, char **argv)
 {
-    bool check_dups = true;
-    int blocksize = 32;
-    int pagesize = 4096;
     const char *profile = 0;
-    int preset = 2;
     bool usage = false;
     int opt;
 
@@ -359,7 +443,7 @@ int main(int argc, char **argv)
     struct stat st;
     stat(infile, &st);
 
-    uint32_t num_pages = st.st_size / pagesize;
+    num_pages = st.st_size / pagesize;
     /* ext3 should be X blocks */
     if (num_pages * pagesize != st.st_size)
         num_pages++;
@@ -369,12 +453,11 @@ int main(int argc, char **argv)
     if (oparts * blocksize != num_pages)
         oparts++;
 
-    uint32_t *found = ( uint32_t* )malloc(sizeof(uint32_t)*num_pages);
+    found = ( uint32_t* )malloc(sizeof(uint32_t)*num_pages);
     memset(found, 0, sizeof(int)*num_pages);
-    uint32_t *ublocks = ( uint32_t* )malloc(sizeof(uint32_t)*num_pages);
+    ublocks = ( uint32_t* )malloc(sizeof(uint32_t)*num_pages);
     memset(ublocks, 0, sizeof(int)*num_pages);
 
-    uint32_t pindex = 0;
     // always take the first block to make the algorithm easier
     ublocks[pindex++] = 0;
     found[0] = pindex;
@@ -401,15 +484,12 @@ int main(int argc, char **argv)
 
     fprintf(stderr, "pindex %ld %ld\n", (long)pindex, (long)num_pages);
 
-    int infd = open(infile, O_RDONLY);
+    infd = open(infile, O_RDONLY);
     FILE *out = fopen(outfile, "w");
     if (!out) {
         perror("open output");
         return 1;
     }
-
-    unsigned char inbuf[blocksize*pagesize];
-    unsigned char outbuf[blocksize*pagesize + 300];
 
     uint64_t total_in = 0;
     uint64_t total_out = 0;
@@ -449,91 +529,42 @@ int main(int argc, char **argv)
 
     off_t index_blocks = index_off;
     index_off += num_pages * sizeof( uint32_t );
-    uint32_t *blockmap = new uint32_t[num_pages];
+    blockindex = new uint32_t[num_pages];
 
     off_t index_part = index_off;
     index_off += 2 * oparts * sizeof(uint64_t) + sizeof(uint32_t);
     fseek(out, index_off, SEEK_SET);
 
-    uint32_t rindex = 0; // overall index
-    uint32_t uindex = 0; // index for "unused" blocks
+    initialise_threads();
 
-    std::map<std::string,uint32_t> dups;
+    int write_error = false;
+    int oldstate;
 
-    // the number of really saved parts
-    uint32_t parts = 0;
-    uint32_t currentblocksperpart = 0; // for debug output
-    uint32_t lastparts = 0; // for debug output
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldstate);
 
-    uint32_t usedblock = 0; // overall "mapped" index
+    while(1) {
+        outbuf_struct *comp = (outbuf_struct*)queue_get(to_writer);
 
-    while ( rindex < num_pages )
-        {
-            int currentblocks = 0;
-            size_t readin = 0;
-
-            while ( currentblocks < blocksize )
-                {
-                    off_t cindex = 0;
-                    if (rindex < pindex) {
-                        cindex = ublocks[rindex];
-                    } else {
-                        while (found[uindex] && uindex < num_pages)  uindex++;
-                        assert( uindex < num_pages );
-                        if ( uindex < num_pages ) {
-                            cindex = uindex;
-                            uindex++;
-                        }
-                    }
-                    if ( lseek( infd, cindex * pagesize, SEEK_SET) == -1 ) {
-                        perror( "seek" ); return 1;
-                    }
-                    size_t diff= read( infd, inbuf+readin, pagesize);
-                    std::string sm;
-                    if (check_dups)
-                        sm = calc_md5( inbuf+readin, diff );
-                    if ( check_dups && dups.find( sm ) != dups.end() ) {
-                        //fprintf( stderr, "already have %s\n", sm.c_str() );
-                        blockmap[cindex] = dups[sm];
-                    } else {
-                        blockmap[cindex] = usedblock++;
-                        dups[sm] = blockmap[cindex];
-                        readin += diff;
-                        currentblocks++;
-                    }
-                    //fprintf(stderr, "block %ld in part %ld\n", cindex, parts);
-                    rindex++;
-                    currentblocksperpart++;
-                    if ( rindex == num_pages )
-                        break;
-                }
-            size_t outsize = compress(preset, inbuf, readin, outbuf, blocksize*pagesize + 300);
-            sizes[parts] = outsize;
-            offs[parts] = total_out + index_off;
-            total_in += readin;
-            total_out += outsize;
-            if (fwrite(outbuf, outsize, 1, out) != 1) {
-                perror("write"); return 1;
-            }
-
-            parts++;
-            if ((int)(rindex * 100. / num_pages) > lastpercentage || rindex >= num_pages - 1 && parts > lastparts && readin ) {
-                fprintf(stderr, "part blocks:%d%% parts:%ld bpp:%d current:%d%% total:%d%%\n",
-                        (int)(rindex * 100. / num_pages), (long)parts,
-                        (int)( currentblocksperpart / ( parts - lastparts ) ),
-                        (int)(outsize * 100 / readin), (int)(total_out * 100 / total_in));
-                lastpercentage++;
-                lastparts = parts;
-                currentblocksperpart = 0;
-            }
+        sizes[comp->part] = comp->outsize;
+        offs[comp->part] = total_out + index_off;
+        total_in += comp->insize;
+        total_out += comp->outsize;
+        if (fwrite(comp->outbuf, comp->outsize, 1, out) != 1) {
+            perror("write"); return 1;
         }
+
+        fprintf( stderr,  "buffer %ld %ld %ld %ld %d %ld\n", comp->part, comp->insize, comp->outsize, comp->bpp, thread[0] == 0, comp->lastblock );
+        if ( !thread[0] && comp->lastblock )
+            break;
+    }
 
     if (fseek(out, index_blocks, SEEK_SET) < 0) {
         perror("seek"); return 1;
     }
 
     for (i = 0; i < num_pages; ++i)
-        if (!writeindex(out, blockmap[i]))
+        if (!writeindex(out, blockindex[i]))
             return 1;
 
     if (fseek(out, index_part, SEEK_SET) < 0) {
@@ -553,7 +584,7 @@ int main(int argc, char **argv)
     fclose(out);
     close( infd );
 
-    delete [] blockmap;
+    delete [] blockindex;
 
     return 0;
 }
