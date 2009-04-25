@@ -294,7 +294,7 @@ void *deflator(void *arg)
             out->totalin = in->totalin;
 
             //fprintf( stderr,  "compress %x %ld -> %ld\n", in->inbuf, in->readin, out->outsize );
-            delete in->inbuf;
+            delete [] in->inbuf;
             delete in;
 
             queue_put(to_writer, out);
@@ -397,12 +397,14 @@ int writer(size_t oparts, off_t index_off, FILE *out, uint64_t *sizes, uint64_t 
 
             if ( !thread[0] && comp->lastblock ) {
                 delete comp;
-                return 0;
+		goto out;
             }
             comps[comp->part] = 0;
             delete comp;
         }
     }
+out:
+    delete [] comps;
     return 0;
 }
 
@@ -571,6 +573,8 @@ int main(int argc, char **argv)
     close( infd );
 
     delete [] blockindex;
+    free(offs);
+    free(sizes);
 
     return 0;
 }
