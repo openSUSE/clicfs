@@ -44,6 +44,9 @@
 <arg choice="opt">
   <option>-l</option> <arg choice="plain">logfile</arg>
 </arg>
+<arg choice="opt">
+  <option>-n</option> <arg choice="plain">cores</arg>
+</arg>
 <arg choice="plain">infile</arg>
 <arg choice="plain">outfile</arg>
 </cmdsynopsis>
@@ -56,6 +59,7 @@
 <para>The blocksize defines how many pages are grouped together before compression. The default is 32, it is a good balance between overhead and compression ratio.</para>
 <para>The compression preset defines on how slow it is or how good it compresses. Compare with xz presets. -c 0 is fast and -c 9 is (very) slow - but the compression rate varies a lot - of course depending on the data. Preset 6 is the default.</para>
 <para>The logfile is the logfile that is generated from clicfs -l, clicfs will output the access pattern and mkclicfs will reorder the blocks so they are in order.</para>
+<para>The number of cores is by default taken from the system. Sometimes it's wise to not all of them though.</para>
 </refsect1>
 
 <refsect1>

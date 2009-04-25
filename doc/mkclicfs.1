@@ -171,18 +171,24 @@ mkclicfs \- Create Clic File
 .SH "Synopsis"
 .fam C
 .HP \w'\fBmkclicfs\fR\ 'u
-\fBmkclicfs\fR [\fB\-d\fR] [\fB\-p\fR\ pagesize] [\fB\-b\fR\ blocksize] [\fB\-c\fR\ compression] [\fB\-l\fR\ logfile] infile outfile
+\fBmkclicfs\fR [\fB\-d\fR] [\fB\-p\fR\ pagesize] [\fB\-b\fR\ blocksize] [\fB\-c\fR\ compression] [\fB\-l\fR\ logfile] [\fB\-n\fR\ cores] infile outfile
 .fam
 .SH "Description"
 .PP
-The infile is a loop image (so far only tested with ext3) that is assumed to use 4K pages\&. The outfile is the Compressed Loop Image Container (Clic), it will contain X parts with blocksize\&. mkclicfs automatically discards duplicated pages\&. A good value for blocksize is 131072, it is a good balance between overhead and compression ratio and it will be default in future releases\&.
+The infile is a loop image (so far only tested with ext3) that is assumed to use pages of pagesize\&. The outfile is the Compressed Loop Image Container (Clic), it will contain X parts with blocksize\&. mkclicfs automatically discards duplicated pages, unless \-d is given\&.
 .PP
-The preset defines on how slow it is or how good it compresses\&. Compare with xz presets\&. \-0 is fast and \-9 is (very) slow \- but the compression rate varies a lot \- of course depending on the data\&. Preset 6 is the default\&.
+The default for the pagesize is 4096, the default for ext3
 .PP
-The profile is the logfile that is generated from clicfs \-l, clicfs will output the access pattern and mkclicfs will reorder the blocks so they are in order\&.
+The blocksize defines how many pages are grouped together before compression\&. The default is 32, it is a good balance between overhead and compression ratio\&.
+.PP
+The compression preset defines on how slow it is or how good it compresses\&. Compare with xz presets\&. \-c 0 is fast and \-c 9 is (very) slow \- but the compression rate varies a lot \- of course depending on the data\&. Preset 6 is the default\&.
+.PP
+The logfile is the logfile that is generated from clicfs \-l, clicfs will output the access pattern and mkclicfs will reorder the blocks so they are in order\&.
+.PP
+The number of cores is by default taken from the system\&. Sometimes it\'s wise to not all of them though\&.
 .SH "See Also"
 .PP
-clicfs, undoenerfs
+clicfs, unclicfs
 .SH "Author"
 .PP
 Stephan Kulow

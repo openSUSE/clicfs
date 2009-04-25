@@ -294,6 +294,7 @@ void *deflator(void *arg)
 
             outbuf_struct *out = new outbuf_struct();
             out->outbuf = new unsigned char[blocksize*pagesize + 300];
+//	    fprintf( stderr,  "compress start %ld %d %x %ld\n", pthread_self(), in->part, in->inbuf, in->readin );
             out->outsize = compress(preset, in->inbuf, in->readin, out->outbuf, blocksize*pagesize + 300);
             out->part = in->part;
             out->insize = in->readin;
@@ -301,7 +302,7 @@ void *deflator(void *arg)
             out->lastblock = in->lastblock;
             out->totalin = in->totalin;
 
-            //fprintf( stderr,  "compress %x %ld -> %ld\n", in->inbuf, in->readin, out->outsize );
+//            fprintf( stderr,  "compress %ld %d %x %ld -> %ld\n", pthread_self(), in->part, in->inbuf, in->readin, out->outsize );
             delete [] in->inbuf;
             delete in;
 
@@ -378,6 +379,9 @@ int writer(size_t oparts, off_t index_off, FILE *out, uint64_t *sizes, uint64_t 
 
     int lastpercentage = 0;
 
+    struct timeval start;
+    gettimeofday(&start, 0);
+
     while(1) {
         outbuf_struct *comp = (outbuf_struct*)queue_get(to_writer);
         //fprintf(stderr, "got %ld %ld %d %d\n", comp->part, lastpart, queue_length(to_writer), queue_length(from_reader));
@@ -395,9 +399,13 @@ int writer(size_t oparts, off_t index_off, FILE *out, uint64_t *sizes, uint64_t 
             }
 
             if ((int)(100 * total_in / full_size) > lastpercentage || comp->lastblock ) {
-                fprintf(stderr, "part blocks:%d%% parts:%ld total:%d%%\n",
+                struct timeval current;
+                gettimeofday(&current, 0);
+                fprintf(stderr, "part blocks:%d%% parts:%ld total:%d%% time:%d\n",
                         lastpercentage+1, (long)comp->part,
-                        (int)(total_out * 100 / total_in) );
+                        (int)(total_out * 100 / total_in), (current.tv_sec - start.tv_sec) * 1000 + ((current.tv_usec - start.tv_usec) / 1000 ));
+                start.tv_sec = current.tv_sec;
+		start.tv_usec = current.tv_usec;
                 lastpercentage++;
             }
 
@@ -420,7 +428,7 @@ int main(int argc, char **argv)
     bool usage = false;
     int opt;
 
-    while ((opt = getopt(argc, argv, "dp:b:l:c:")) != -1) {
+    while ((opt = getopt(argc, argv, "dp:b:l:c:n:")) != -1) {
         switch (opt) {
         case 'd':
             check_dups = false;
@@ -442,6 +450,11 @@ int main(int argc, char **argv)
             preset = atoi(optarg);
             if (preset < 0 || preset > 9)
                 usage = true;
+            break;
+        case 'n':
+	    processors = atoi(optarg);
+	    if (processors < 1)
+		usage = true;
             break;
         default: /* '?' */
             usage = true;
