@@ -350,7 +350,7 @@ void initialise_threads()
                     exit( 1 );
         }
 
-        fprintf(stderr,  "Parallel mksquashfs: Using %d processor%s\n", processors,
+        fprintf(stderr,  "Parallel mkclicfs: Using %d processor%s\n", processors,
                         processors == 1 ? "" : "s");
 
         if(sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1)
