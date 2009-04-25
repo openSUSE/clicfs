@@ -140,6 +140,13 @@ struct queue *queue_init(int size)
         return queue;
 }
 
+int queue_length(struct queue *queue) 
+{
+   pthread_mutex_lock(&queue->mutex);
+   int ret = (queue->writep - queue->readp + queue->size) % queue->size;
+   pthread_mutex_unlock(&queue->mutex);  
+   return ret;
+}
 
 void queue_put(struct queue *queue, void *data)
 {
@@ -251,6 +258,7 @@ void *reader(void *arg)
         in->part = parts++;
         in->bpp = currentblocksperpart;
         currentblocksperpart = 0;
+        //fprintf( stderr, "put part %d %d\n", in->part, queue_length(from_reader));
         queue_put( from_reader, in );
 
     }
@@ -338,11 +346,8 @@ void initialise_threads()
         if((thread = (pthread_t*)malloc((2 + processors * 2) * sizeof(pthread_t))) == NULL)
             exit( 1 );
 
-        size_t reader_buffer_size = 64;
-        size_t writer_buffer_size = 512;
-
-        from_reader = queue_init(reader_buffer_size);
-        to_writer = queue_init(writer_buffer_size);
+        from_reader = queue_init(20);
+        to_writer = queue_init(20);
         pthread_create(&thread[0], NULL, reader, NULL);
 
         for(i = 0; i < processors; i++) {
@@ -375,6 +380,7 @@ int writer(size_t oparts, off_t index_off, FILE *out, uint64_t *sizes, uint64_t 
 
     while(1) {
         outbuf_struct *comp = (outbuf_struct*)queue_get(to_writer);
+        //fprintf(stderr, "got %ld %ld %d %d\n", comp->part, lastpart, queue_length(to_writer), queue_length(from_reader));
         comps[comp->part] = comp;
 
         while ( comps[lastpart + 1] ) {
