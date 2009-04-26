@@ -409,7 +409,7 @@ int writer(size_t oparts, off_t index_off, FILE *out, uint64_t *sizes, uint64_t 
                 lastpercentage++;
             }
 
-            if ( !thread[0] && comp->lastblock ) {
+            if ( comp->lastblock ) {
                 delete comp;
 		goto out;
             }
