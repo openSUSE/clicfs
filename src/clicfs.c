@@ -50,7 +50,7 @@ static uint32_t clic_find_next_cow()
 
 static int clic_write_cow()
 {
-    if (!cowfilename)
+    if (!cowfilename || cowfile_ro == 1)
 	return 0;
 
     uint32_t indexlen = sizeof(uint32_t) * 2;
@@ -530,8 +530,12 @@ int main(int argc, char *argv[])
     free(packfilename);
 
     if (cowfilename) {
-	if (access(cowfilename, W_OK)) {
+	if (access(cowfilename, R_OK)) {
 	    FILE *cow = fopen(cowfilename, "w");
+	    if (!cow) {
+	      perror("opening cow");
+	      return 1;
+	    }
 	    uint32_t stringlen = (thefilesize / pagesize * pagesize) + 512 * 1024 * 1024;
 	    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
 	    stringlen = 0;

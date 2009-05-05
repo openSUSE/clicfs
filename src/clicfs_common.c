@@ -44,6 +44,7 @@ uint32_t num_pages = 0;
 uint32_t cow_pages = 0;
 uint32_t *cows = 0;
 unsigned int cows_index = 0;
+int cowfile_ro = 0;
 
 static lzma_stream strm;
 
@@ -68,10 +69,18 @@ uint32_t clic_readindex_file(FILE * f)
 int clicfs_read_cow(const char *cowfilename)
 {
     cowfilefd = open(cowfilename, O_RDWR);
+
     if (cowfilefd == -1 ) {
-	fprintf(stderr, "cowfile %s can't be opened\n", cowfilename);
-        return 1;
-    }
+
+        cowfilefd = open(cowfilename, O_RDONLY);
+	if (cowfilefd == -1) {
+	  fprintf(stderr, "cowfile %s can't be opened\n", cowfilename);
+	  return 1;
+	} else {
+	  cowfile_ro = 1;
+	}
+    } else
+      cowfile_ro = 0;
    
     struct stat st;
     fstat(cowfilefd, &st);

@@ -39,6 +39,8 @@ extern size_t bsize;
 extern uint32_t num_pages;
 // the number of pages in the cow index
 extern uint32_t cow_pages;
+// support temporary changes on ro medium
+extern int cowfile_ro;
 
 #define DOENER_COW_COUNT 100
 
