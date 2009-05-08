@@ -451,11 +451,14 @@ static void clic_init_buffer(int i)
 
 char *packfilename = 0;
 char *logfile = 0;
+int ignore_cow_errors = 0;
 
-enum  { FUSE_OPT_MEMORY, FUSE_OPT_LOGGER, FUSE_OPT_COWFILE };
+enum  { FUSE_OPT_SPARSE, FUSE_OPT_LOGGER, FUSE_OPT_COWFILE, FUSE_OPT_IGNORE_COW_ERRORS };
 
 struct fuse_opt clic_opt[] = {
-    FUSE_OPT_KEY("-m %s", FUSE_OPT_MEMORY),
+    FUSE_OPT_KEY("--resevere-sparse %s", FUSE_OPT_SPARSE),
+    FUSE_OPT_KEY("--ignore-cow-errors", FUSE_OPT_IGNORE_COW_ERRORS),
+    FUSE_OPT_KEY("-m %s", FUSE_OPT_SPARSE),
     FUSE_OPT_KEY("-l %s", FUSE_OPT_LOGGER),
     FUSE_OPT_KEY("-c %s", FUSE_OPT_COWFILE),
     FUSE_OPT_END
@@ -473,7 +476,7 @@ int clic_opt_proc(void *data, const char *arg, int key, struct fuse_args *outarg
 		return 0;
 	    }
 	    break;
-	case FUSE_OPT_MEMORY:
+	case FUSE_OPT_SPARSE:
 	     sparse_memory = atoi(arg+2);
 	     return 0;
 	     break;
@@ -485,9 +488,31 @@ int clic_opt_proc(void *data, const char *arg, int key, struct fuse_args *outarg
 	     cowfilename = strdup(arg+2);
 	     return 0;
 	     break;
+        case FUSE_OPT_IGNORE_COW_ERRORS:
+	     ignore_cow_errors = 1;
+	     break;
     }
 	
     return 1;
+}
+
+static int init_cow()
+{
+  FILE *cow = fopen(cowfilename, "w");
+  if (!cow) {
+    perror("opening cow");
+    return 1;
+  }
+  uint32_t stringlen = (thefilesize / pagesize * pagesize) + sparse_memory * 1024 * 1024;
+  fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
+  stringlen = 0;
+  // there are 0 blocks
+  fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
+  // the whole index is 8 bytes long
+  stringlen = sizeof(uint32_t) * 2;
+  fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
+  fclose(cow);
+  return 0;
 }
 
 int main(int argc, char *argv[])
@@ -514,11 +539,8 @@ int main(int argc, char *argv[])
     // not sure why but multiple threads make it slower
     fuse_opt_add_arg(&args, "-s");
 
-    if (!packfilename || (cowfilename && sparse_memory)) {
+    if (!packfilename) {
 	fprintf(stderr, "usage: [-m <mb>] [-l <logfile|->] [-c <cowfile>] <packfile> <mntpoint>\n");
-	if (cowfilename && sparse_memory) {
-	    fprintf(stderr, "writes can go either into cowfile or memory\n");
-	}
         return 1;
     }
 
@@ -530,24 +552,19 @@ int main(int argc, char *argv[])
     free(packfilename);
 
     if (cowfilename) {
-	if (access(cowfilename, R_OK)) {
-	    FILE *cow = fopen(cowfilename, "w");
-	    if (!cow) {
-	      perror("opening cow");
-	      return 1;
-	    }
-	    uint32_t stringlen = (thefilesize / pagesize * pagesize) + 512 * 1024 * 1024;
-	    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
-	    stringlen = 0;
-	    // there are 0 blocks
-	    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
-	    // the whole index is 8 bytes long
-	    stringlen = sizeof(uint32_t) * 2;
-	    fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
-	    fclose(cow);
-	}
+      
+      if (access(cowfilename, R_OK))
+	init_cow();
+
+      if (clicfs_read_cow(cowfilename)) {
+	if (!ignore_cow_errors)
+	  return 1;
+	
+	init_cow();
 	if (clicfs_read_cow(cowfilename))
-	    return 1;
+	  return 1;
+	sparse_memory = 0; // ignore the option if we have a cow
+      }
     }
 
     // fake for write
