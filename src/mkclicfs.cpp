@@ -262,8 +262,6 @@ void *reader(void *arg)
         queue_put( from_reader, in );
 
     }
-    fprintf( stderr, "thread 0 is gone\n" );
-
     thread[0] = 0;
 
     pthread_exit(NULL);
@@ -473,6 +471,10 @@ int main(int argc, char **argv)
 
     struct stat st;
     stat(infile, &st);
+    if (!S_ISREG( st.st_mode )) {
+	fprintf(stderr, "expecting regular file as input: %s\n", infile);
+        return EXIT_FAILURE;
+    }
 
     num_pages = st.st_size / pagesize;
     /* ext3 should be X blocks */
