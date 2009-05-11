@@ -42,7 +42,7 @@ extern uint32_t cow_pages;
 // support temporary changes on ro medium
 extern int cowfile_ro;
 
-#define DOENER_COW_COUNT 100
+#define CLICFS_COW_COUNT 1000
 
 // an array
 extern uint32_t *cows;

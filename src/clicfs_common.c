@@ -112,7 +112,7 @@ int clicfs_read_cow(const char *cowfilename)
 	assert(pageindex < num_pages);
 	blockmap[pageindex] = (unsigned char*)(long)(page << 2) + 2;
     }
-    cows = malloc(sizeof(uint32_t) * DOENER_COW_COUNT);
+    cows = malloc(sizeof(uint32_t) * CLICFS_COW_COUNT);
     cows_index = 0;
     return 0;
 }

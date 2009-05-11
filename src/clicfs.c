@@ -50,8 +50,10 @@ static uint32_t clic_find_next_cow()
 
 static int clic_write_cow()
 {
-    if (!cowfilename || cowfile_ro == 1)
+    if (!cowfilename || cowfile_ro == 1 || !detached_allocated)
 	return 0;
+
+    fprintf(stderr, "cow detached %dMB\n", (int)(detached_allocated / 1024));
 
     uint32_t indexlen = 0;
     uint32_t i;
@@ -262,16 +264,13 @@ static size_t clic_read_block(char *buf, size_t block);
 
 static int clic_detach(size_t block)
 {
-    if (detached_allocated > 1500 && cowfilefd != -1)
-	clic_write_cow();
-    
     assert(block < num_pages);
 
     unsigned char *ptr = blockmap[block];
     if (((long)ptr & 0x3) == 1 || ((long)ptr & 0x3) == 2)
     {
 	if (((long)ptr & 0x3) == 2) {
-	    if (cows_index == DOENER_COW_COUNT - 1)
+	    if (cows_index == CLICFS_COW_COUNT - 1)
 		clic_write_cow();
 	}
 
