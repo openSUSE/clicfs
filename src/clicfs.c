@@ -53,7 +53,7 @@ static int clic_write_cow()
     if (!cowfilename || cowfile_ro == 1)
 	return 0;
 
-    uint32_t indexlen = sizeof(uint32_t) * 2;
+    uint32_t indexlen = 0;
     uint32_t i;
     for (i = 0; i < num_pages; ++i)
     {
@@ -70,11 +70,10 @@ static int clic_write_cow()
     }
 
     lseek(cowfilefd, cow_pages * pagesize, SEEK_SET);
-    uint32_t stringlen = thefilesize;
-    write(cowfilefd, (char*)&stringlen, sizeof(uint32_t));
+    uint64_t stringlen = thefilesize;
+    indexlen += write(cowfilefd, (char*)&stringlen, sizeof(uint64_t));
     stringlen = cow_pages;
-    write(cowfilefd, (char*)&stringlen, sizeof(uint32_t));
-    lseek(cowfilefd, cow_pages * pagesize + sizeof(uint32_t) * 2, SEEK_SET);
+    indexlen += write(cowfilefd, (char*)&stringlen, sizeof(uint32_t));
     stringlen = 0;
     for (i = 0; i < num_pages; ++i)
     {
@@ -264,6 +263,8 @@ static int clic_detach(size_t block)
     if (detached_allocated > 1500 && cowfilefd != -1)
 	clic_write_cow();
     
+    assert(block < num_pages);
+
     unsigned char *ptr = blockmap[block];
     if (((long)ptr & 0x3) == 1 || ((long)ptr & 0x3) == 2)
     {
@@ -503,13 +504,13 @@ static int init_cow()
     perror("opening cow");
     return 1;
   }
-  uint32_t stringlen = (thefilesize / pagesize * pagesize) + sparse_memory * 1024 * 1024;
-  fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
-  stringlen = 0;
+  uint64_t stringlen64 = (thefilesize / pagesize * pagesize) + sparse_memory * 1024 * 1024;
+  fwrite((char*)&stringlen64, 1, sizeof(uint64_t), cow);
+  uint32_t stringlen = 0;
   // there are 0 blocks
   fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
-  // the whole index is 8 bytes long
-  stringlen = sizeof(uint32_t) * 2;
+  // the whole index is 12 bytes long
+  stringlen = sizeof(uint32_t) + sizeof(uint64_t);
   fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
   fclose(cow);
   return 0;
@@ -563,8 +564,8 @@ int main(int argc, char *argv[])
 	init_cow();
 	if (clicfs_read_cow(cowfilename))
 	  return 1;
-	sparse_memory = 0; // ignore the option if we have a cow
       }
+      sparse_memory = 0; // ignore the option if we have a cow
     }
 
     // fake for write

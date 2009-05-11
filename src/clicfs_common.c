@@ -57,6 +57,15 @@ uint32_t clic_readindex_fd(int fd)
     return stringlen;
 }
 
+uint64_t clic_readindex_fd64(int fd)
+{
+    uint64_t stringlen = 0;
+    if (read(fd, &stringlen, sizeof(uint64_t)) != sizeof(uint64_t)) {
+        return 0;
+    }
+    return stringlen;
+}
+
 uint32_t clic_readindex_file(FILE * f)
 {
     uint32_t stringlen = 0;
@@ -88,7 +97,7 @@ int clicfs_read_cow(const char *cowfilename)
     uint32_t indexlen = clic_readindex_fd(cowfilefd) + sizeof(uint32_t);
     if (lseek(cowfilefd, st.st_size - indexlen, SEEK_SET ) == -1)
 	perror("seek");
-    thefilesize = clic_readindex_fd(cowfilefd);
+    thefilesize = clic_readindex_fd64(cowfilefd);
     uint32_t newpages = thefilesize / pagesize;
     blockmap = realloc(blockmap, sizeof(unsigned char*)*newpages);
     uint32_t i;
