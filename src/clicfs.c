@@ -58,16 +58,18 @@ static int clic_write_cow()
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
-	//fprintf(stderr, "ptr %ld %d\n", (long)i, (int)(ptr & 0x3));
 	if (ptr && (ptr & 0x3) == 0) { // detached now
 	    uint32_t cowindex = clic_find_next_cow();
 	    lseek(cowfilefd, cowindex * pagesize, SEEK_SET);
-	    write(cowfilefd, blockmap[i], pagesize);
+	    size_t ret = write(cowfilefd, blockmap[i], pagesize);
+	    assert(ret == pagesize);
 	    free(blockmap[i]);
 	    detached_allocated -= (pagesize / 1024);
 	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
 	}
     }
+
+    assert(!detached_allocated);
 
     lseek(cowfilefd, cow_pages * pagesize, SEEK_SET);
     uint64_t stringlen = thefilesize;
@@ -298,10 +300,10 @@ static int clic_detach(size_t block)
     return 0;
 }
 
-static size_t clic_write_block(const char *buf, off_t block, size_t size)
+static size_t clic_write_block(const char *buf, off_t block, off_t ioff, size_t size)
 {
     clic_detach(block);
-    memcpy(blockmap[block], buf, size);
+    memcpy(blockmap[block]+ioff, buf, size);
     return size;
 }
 
@@ -323,12 +325,13 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     assert(ioff == 0 || ioff + size <= pagesize);
 
     if (size <= pagesize) {
-	return clic_write_block(buf+ioff, block, size);
+        return clic_write_block(buf, block, ioff, size);
     } else {
 	size_t wrote = 0;
 	do
 	{
-	    size_t diff = clic_write_block(buf, block, size > pagesize ? pagesize : size);
+	    size_t diff = clic_write_block(buf, block, ioff, size > pagesize ? pagesize : size);
+	    ioff = 0;
 	    size -= diff;
 	    buf += diff;
 	    block++;
