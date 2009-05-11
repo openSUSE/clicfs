@@ -28,6 +28,12 @@ extern int cowfilefd;
 
 #define DOENER_MAGIC 1
 
+#define PTR_CLASS(x) ((long)x & 0x3)
+
+enum { CLASS_MEMORY = 0,
+       CLASS_RO = 1,
+       CLASS_COW = 2 };
+
 extern char thefile[PATH_MAX];
 extern size_t thefilesize;
 extern size_t pagesize;

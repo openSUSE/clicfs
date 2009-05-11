@@ -201,7 +201,7 @@ off_t clic_map_block(off_t block)
     unsigned char *ptr = blockmap[block];
     size_t ret = (long)ptr;
     // calling map_block for detached blocks is bogus
-    assert((ret & 0x3) == 1);
+    assert(PTR_CLASS(ret) == 1);
     return ret >> 2;
 }
 

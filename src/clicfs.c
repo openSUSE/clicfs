@@ -60,7 +60,7 @@ static int clic_write_cow()
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
-	if (ptr && (ptr & 0x3) == 0) { // detached now
+	if ( ptr && PTR_CLASS(ptr) == CLASS_MEMORY ) { // detached now
 	    uint32_t cowindex = clic_find_next_cow();
 	    lseek(cowfilefd, cowindex * pagesize, SEEK_SET);
 	    size_t ret = write(cowfilefd, blockmap[i], pagesize);
@@ -82,7 +82,7 @@ static int clic_write_cow()
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
-	if ((ptr & 0x3) == 2) { // block
+	if (PTR_CLASS(ptr) == CLASS_COW) { // block
 	    uint32_t key = i, value = ptr >> 2;
 	    write(cowfilefd, (char*)&key, sizeof(uint32_t));
 	    write(cowfilefd, (char*)&value, sizeof(uint32_t));
@@ -267,9 +267,9 @@ static int clic_detach(size_t block)
     assert(block < num_pages);
 
     unsigned char *ptr = blockmap[block];
-    if (((long)ptr & 0x3) == 1 || ((long)ptr & 0x3) == 2)
+    if ((PTR_CLASS(ptr) == CLASS_RO ) || (PTR_CLASS(ptr) == CLASS_COW))
     {
-	if (((long)ptr & 0x3) == 2) {
+	if (PTR_CLASS(ptr) == CLASS_COW) {
 	    if (cows_index == CLICFS_COW_COUNT - 1)
 		clic_write_cow();
 	}
@@ -279,7 +279,7 @@ static int clic_detach(size_t block)
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 
 	clic_read_block(newptr, block);
-	if (((long)ptr & 0x3) == 2) // we need to mark the place in the cow obsolete
+	if (PTR_CLASS(ptr) == CLASS_COW) // we need to mark the place in the cow obsolete
 	    cows[cows_index++] = (long)ptr >> 2;
 	blockmap[block] = (unsigned char*)newptr;
 
@@ -289,7 +289,7 @@ static int clic_detach(size_t block)
     if (!blockmap[block])
     {
 	blockmap[block] = malloc(pagesize);
-	assert(((long)ptr & 0x3) == 0);
+	assert(PTR_CLASS(ptr) == CLASS_MEMORY);
 	detached_allocated += (pagesize / 1024);
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 	memset(blockmap[block],0,pagesize);
@@ -355,18 +355,18 @@ static size_t clic_read_block(char *buf, size_t block)
     }
 
     long ptr = (long)blockmap[block];
-    if ((ptr & 0x3) == 0) {
+    if (PTR_CLASS(ptr) == CLASS_MEMORY) {
 	// detached
 	memcpy(buf, blockmap[block], pagesize);
 	return pagesize;
     }
 
-    if ((ptr & 0x3) == 2) {
+    if (PTR_CLASS(ptr) == CLASS_COW) {
 	lseek(cowfilefd, (ptr >> 2) * pagesize, SEEK_SET);
 	return read(cowfilefd, buf, pagesize);
     }
 
-    assert((ptr & 0x3) == 1); // in read only part
+    assert(PTR_CLASS(ptr) == CLASS_RO); // in read only part
     assert(block < num_pages);
 
     off_t mapped_block = clic_map_block(block);
