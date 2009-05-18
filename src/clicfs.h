@@ -35,7 +35,7 @@ enum { CLASS_MEMORY = 0,
        CLASS_COW = 2 };
 
 extern char thefile[PATH_MAX];
-extern size_t thefilesize;
+extern uint64_t thefilesize;
 extern size_t pagesize;
 extern uint64_t *sizes;
 extern uint64_t *offs;

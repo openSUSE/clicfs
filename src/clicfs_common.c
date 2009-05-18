@@ -32,7 +32,7 @@ FILE *packfile = 0;
 int cowfilefd = -1;
 
 char thefile[PATH_MAX];
-size_t thefilesize = 0;
+uint64_t thefilesize = 0;
 size_t pagesize = 4096;
 uint64_t *sizes = 0;
 uint64_t *offs = 0;
@@ -145,7 +145,7 @@ int clicfs_read_pack(const char *packfilename)
     }
     thefile[stringlen] = 0;
 
-    size_t oparts = clic_readindex_file(packfile);
+    uint64_t oparts = clic_readindex_file(packfile);
     bsize = clic_readindex_file(packfile);
     pagesize = clic_readindex_file(packfile);
     thefilesize = oparts * bsize * pagesize;
