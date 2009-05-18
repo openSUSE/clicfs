@@ -32,8 +32,6 @@
 
 FILE *logger = 0;
 
-static uint32_t write_pages = 0;
-
 static size_t detached_allocated = 0;
 static size_t sparse_memory = 0;
 static char *cowfilename = 0;
@@ -314,9 +312,14 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
 
-    if (offset >= (off_t)thefilesize) {
+    if (offset >= (off_t)thefilesize)
         return 0;
-    }
+
+    if (offset+size > thefilesize)
+	size = thefilesize-offset;
+
+    if (!size)
+	return 0;
 
     off_t block = offset / pagesize;
     off_t ioff = offset - block * pagesize;
@@ -343,10 +346,9 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
 
 static size_t clic_read_block(char *buf, size_t block)
 {
-    if (block >= write_pages)
-	return 0;
+    if (block >= num_pages)
+	return -EFAULT;
 
-    assert(block < write_pages);
     clic_log_access(block);
 
     if (!blockmap[block]) { // sparse block 
@@ -573,16 +575,16 @@ int main(int argc, char *argv[])
     // fake for write
     if (sparse_memory) {
       thefilesize = (thefilesize / pagesize * pagesize) + sparse_memory * 1024 * 1024;
-      write_pages = thefilesize / pagesize;
+      size_t write_pages = thefilesize / pagesize;
       blockmap = realloc(blockmap, sizeof(unsigned char*)*write_pages);
-    } else
-      write_pages = num_pages;
+      uint32_t i;
+      for (i = num_pages; i < write_pages; ++i)
+        blockmap[i] = 0;
+      num_pages = write_pages;
+    }
 
     uint32_t i;
  
-    for (i = num_pages; i < write_pages; ++i)
-	blockmap[i] = 0;
-
     com_count = 6000000 / (bsize*pagesize); // get 6MB of cache
     coms = malloc(sizeof(struct buffer_combo) * com_count);
     for (i = 0; i < com_count; ++i)
