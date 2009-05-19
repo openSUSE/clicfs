@@ -562,13 +562,13 @@ int main(int argc, char **argv)
 
     off_t index_part = index_off;
     index_off += 2 * oparts * sizeof(uint64_t) + sizeof(uint32_t);
-    fseek(out, index_off, SEEK_SET);
+    fseeko(out, index_off, SEEK_SET);
 
     initialise_threads();
     if ( writer(oparts, index_off, out, sizes, offs, st.st_size) )
         return 1;
 
-    if (fseek(out, index_blocks, SEEK_SET) < 0) {
+    if (fseeko(out, index_blocks, SEEK_SET) < 0) {
         perror("seek"); return 1;
     }
 
@@ -576,7 +576,7 @@ int main(int argc, char **argv)
         if (!writeindex(out, blockindex[i]))
             return 1;
 
-    if (fseek(out, index_part, SEEK_SET) < 0) {
+    if (fseeko(out, index_part, SEEK_SET) < 0) {
         perror("seek"); return 1;
     }
 

@@ -182,7 +182,7 @@ int clicfs_read_pack(const char *packfilename)
         fprintf(stderr, "unreasonable part number 0\n");
 	return 1;
     }
-    fseek(packfile, (oparts-parts)*sizeof(uint64_t)*2, SEEK_CUR);
+    fseeko(packfile, (oparts-parts)*sizeof(uint64_t)*2, SEEK_CUR);
 
     const uint32_t flags = LZMA_TELL_UNSUPPORTED_CHECK | LZMA_CONCATENATED;
     // C sucks
