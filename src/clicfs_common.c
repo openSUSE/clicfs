@@ -207,8 +207,8 @@ off_t clic_map_block(off_t block)
 
 size_t clic_readpart(unsigned char *buffer, int part)
 {
-    if (fseek(packfile, offs[part], SEEK_SET)) {
-	fprintf(stderr, "seek failed %d %ld\n", part, (long)offs[part]);
+    if (fseeko(packfile, offs[part], SEEK_SET)) {
+	fprintf(stderr, "seek failed %d %lld\n", part, (long long)offs[part]);
 	return 0;
     }
 #if defined(DEBUG)
