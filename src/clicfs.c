@@ -30,6 +30,8 @@
 #include <pthread.h>
 #include <sys/time.h>
 
+#define DEBUG 1
+
 FILE *logger = 0;
 
 static size_t detached_allocated = 0;
@@ -168,7 +170,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
 {
     struct buffer_combo *com;
 
-    //fprintf(logger, "clic_uncompress %d %d %d\n", part, parts, wparts);
+    if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
 
     pthread_mutex_lock(&picker);
     int index = -1;
@@ -247,13 +249,13 @@ static void clic_log_access(size_t block)
 
    if (lastblock >= 0 && block != (size_t)(lastblock + 1))
    {
-       fprintf(logger, "access %ld+%ld\n", (long)firstblock, (long)lastblock-firstblock);
+       fprintf(logger, "access %ld+%ld\n", (long)firstblock*2, (long)(lastblock-firstblock+1)*2);
        firstblock = block;
    }
    lastblock = block;
    if (block > firstblock + 30) 
    {
-      fprintf(logger, "access %ld+%ld\n", (long)firstblock, (long)lastblock-firstblock);
+      fprintf(logger, "access %ld+%ld\n", (long)firstblock*2, (long)(lastblock-firstblock+1)*2);
       firstblock = block;
    }
 }
