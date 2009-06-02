@@ -249,13 +249,13 @@ static void clic_log_access(size_t block)
 
    if (lastblock >= 0 && block != (size_t)(lastblock + 1))
    {
-       fprintf(logger, "access %ld+%ld\n", (long)firstblock*2, (long)(lastblock-firstblock+1)*2);
+       fprintf(logger, "access %ld+%ld\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8);
        firstblock = block;
    }
    lastblock = block;
    if (block > firstblock + 30) 
    {
-      fprintf(logger, "access %ld+%ld\n", (long)firstblock*2, (long)(lastblock-firstblock+1)*2);
+      fprintf(logger, "access %ld+%ld\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8);
       firstblock = block;
    }
 }
