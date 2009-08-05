@@ -92,13 +92,24 @@ int clicfs_read_cow(const char *cowfilename)
       cowfile_ro = 0;
    
     struct stat st;
-    fstat(cowfilefd, &st);
-    lseek(cowfilefd, st.st_size - sizeof(uint32_t), SEEK_SET);
+    if (fstat(cowfilefd, &st)) {
+	perror("fstat");
+	return 1;
+    }
+    printf("size %ld\n", (long)st.st_size);
+    if (lseek(cowfilefd, st.st_size - sizeof(uint32_t), SEEK_SET) < 0) {
+	perror("lseek");
+	return 1;
+    }
     uint32_t indexlen = clic_readindex_fd(cowfilefd) + sizeof(uint32_t);
     if (lseek(cowfilefd, st.st_size - indexlen, SEEK_SET ) == -1)
+    {
 	perror("seek");
+	return 1;
+    }
     thefilesize = clic_readindex_fd64(cowfilefd);
     uint32_t newpages = thefilesize / pagesize;
+    printf("np %ld\n", (long)newpages);
     blockmap = realloc(blockmap, sizeof(unsigned char*)*newpages);
     uint32_t i;
     for (i = num_pages; i < newpages; ++i)
