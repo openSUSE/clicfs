@@ -62,7 +62,7 @@ static int clic_write_cow()
 	long ptr = (long)blockmap[i];
 	if ( ptr && PTR_CLASS(ptr) == CLASS_MEMORY ) { // detached now
 	    uint32_t cowindex = clic_find_next_cow();
-	    lseek(cowfilefd, cowindex * pagesize, SEEK_SET);
+	    lseek(cowfilefd, (cowindex + cow_index_pages) * pagesize, SEEK_SET);
 	    size_t ret = write(cowfilefd, blockmap[i], pagesize);
 	    assert(ret == pagesize);
 	    free(blockmap[i]);
@@ -96,6 +96,9 @@ static int clic_write_cow()
     return 0;
 }
 
+/** 
+ * fuse callback to get stat informations
+ */
 static int clic_getattr(const char *path, struct stat *stbuf)
 {
     //fprintf(logger, "getattr %s\n", path);
@@ -117,6 +120,10 @@ static int clic_getattr(const char *path, struct stat *stbuf)
     return res;
 }
   
+/** 
+ * fuse callback to get directory informations. 
+ * We only have one file in one dir
+ */
 static int clic_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 			 off_t offset, struct fuse_file_info *fi)
 {
@@ -143,7 +150,7 @@ static int clic_open(const char *path, struct fuse_file_info *fi)
 //    if((fi->flags & 3) != O_RDONLY)
 //	return -EACCES;
   
-   fi->keep_cache = 1;
+    fi->keep_cache = 1;
     return 0;
 }
 
@@ -169,7 +176,7 @@ FILE *pack;
 static const unsigned char *clic_uncompress(uint32_t part)
 {
     struct buffer_combo *com;
-
+    
     if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
 
     pthread_mutex_lock(&picker);
@@ -497,6 +504,7 @@ int clic_opt_proc(void *data, const char *arg, int key, struct fuse_args *outarg
 	     break;
         case FUSE_OPT_IGNORE_COW_ERRORS:
 	     ignore_cow_errors = 1;
+	     return 0;
 	     break;
     }
 	
@@ -510,15 +518,25 @@ static int init_cow()
     perror("opening cow");
     return 1;
   }
-  uint64_t stringlen64 = (thefilesize / pagesize * pagesize) + sparse_memory * 1024 * 1024;
-  fwrite((char*)&stringlen64, 1, sizeof(uint64_t), cow);
+  uint64_t bigfilesize = (thefilesize / pagesize * pagesize);
+  if (bigfilesize < thefilesize)
+      thefilesize += pagesize;
+  bigfilesize += sparse_memory * 1024 * 1024;
+  
+  assert( DOENER_MAGIC < 100 );
+  int index_len = fprintf(cow, "CLICCOW%02d", DOENER_MAGIC );
+
+  index_len += fwrite((char*)&bigfilesize, 1, sizeof(uint64_t), cow);
   uint32_t stringlen = 0;
   // there are 0 blocks
-  fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
+  index_len += fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
   // the whole index is 12 bytes long
-  stringlen = sizeof(uint32_t) + sizeof(uint64_t);
-  fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
+  stringlen = index_len + sizeof(uint32_t);
+  index_len += fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
   fclose(cow);
+
+  cow_index_pages = index_len / pagesize + 1;
+  
   return 0;
 }
 

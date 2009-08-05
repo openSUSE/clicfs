@@ -42,6 +42,7 @@ size_t bsize = 0;
 unsigned char **blockmap;
 uint32_t num_pages = 0;
 uint32_t cow_pages = 0;
+uint32_t cow_index_pages = 0;
 uint32_t *cows = 0;
 unsigned int cows_index = 0;
 int cowfile_ro = 0;
@@ -90,23 +91,21 @@ int clicfs_read_cow(const char *cowfilename)
 	}
     } else
       cowfile_ro = 0;
-   
-    struct stat st;
-    if (fstat(cowfilefd, &st)) {
-	perror("fstat");
+
+    char head[10];
+    char expected[10];
+    if (read(cowfilefd, head, 9) != 9) {
+	fprintf(stderr, "can't read from %s\n", cowfilename);
 	return 1;
     }
-    printf("size %ld\n", (long)st.st_size);
-    if (lseek(cowfilefd, st.st_size - sizeof(uint32_t), SEEK_SET) < 0) {
-	perror("lseek");
+
+    head[9] = 0;
+    sprintf(expected, "CLICCOW%02d", DOENER_MAGIC);
+    if (strcmp(head,expected)) {
+	fprintf(stderr, "wrong magic: %s vs %s\n", head, expected);
 	return 1;
     }
-    uint32_t indexlen = clic_readindex_fd(cowfilefd) + sizeof(uint32_t);
-    if (lseek(cowfilefd, st.st_size - indexlen, SEEK_SET ) == -1)
-    {
-	perror("seek");
-	return 1;
-    }
+    
     thefilesize = clic_readindex_fd64(cowfilefd);
     uint32_t newpages = thefilesize / pagesize;
     printf("np %ld\n", (long)newpages);
@@ -125,6 +124,10 @@ int clicfs_read_cow(const char *cowfilename)
     }
     cows = malloc(sizeof(uint32_t) * CLICFS_COW_COUNT);
     cows_index = 0;
+    
+    uint32_t index_len = clic_readindex_fd(cowfilefd);
+    cow_index_pages = index_len / pagesize + 1;
+
     return 0;
 }
 
