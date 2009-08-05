@@ -65,3 +65,4 @@ extern void clic_decompress_part(unsigned char *out, const unsigned char *in, si
 extern size_t clic_readpart(unsigned char *buffer, int part);
 extern off_t clic_map_block(off_t block);
 extern uint32_t clic_readindex_fd(int fd );
+extern void clic_free_lzma();

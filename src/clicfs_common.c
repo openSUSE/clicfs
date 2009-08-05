@@ -104,6 +104,8 @@ int clicfs_read_cow(const char *cowfilename)
     if (strcmp(head,expected)) {
 	fprintf(stderr, "wrong magic: %s vs %s\n", head, expected);
 	return 1;
+    } else {
+	fprintf(stderr, "good cow\n");
     }
     
     thefilesize = clic_readindex_fd64(cowfilefd);
@@ -247,7 +249,7 @@ void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t re
     lzma_ret ret;
     while (1) {
 	ret = lzma_code(&strm, LZMA_RUN);
-	//fprintf(stderr, "ret %d %ld %ld\n", ret, strm.avail_in, strm.avail_out );
+	fprintf(stderr, "ret %d %ld %ld\n", ret, strm.avail_in, strm.avail_out );
 	if (ret != LZMA_OK)
 	    break;
 	if (!strm.avail_in)
@@ -256,4 +258,9 @@ void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t re
 
     assert (ret == LZMA_OK);
     /* don't use lzma_end (will free buffers) or LZMA_FINISH (will forbid any new use) */
+}
+
+void clic_free_lzma()
+{
+    lzma_end(&strm);
 }

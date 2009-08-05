@@ -94,7 +94,7 @@ static int clic_write_cow()
     index_len += 2 * sizeof(uint32_t) * cow_pages;
     uint32_t new_cow_index_pages = index_len / pagesize + 1;
     uint32_t moving;
-    int moved = 0;
+    uint32_t moved = 0;
 
     // should all be out
     assert(cows_index == 0);
@@ -112,16 +112,17 @@ static int clic_write_cow()
 		if ((ptr >> 2) == moving) {
 		    fprintf(stderr, "moving %ld %ld\n", (long)moving, (long)i);
 		    clic_detach(i);
-		    moved = 1;
+		    moved++;
 		    break;
 		}
 	    }
 	}
     }
 
+    assert(moved == cows_index);
+
     cow_index_pages = new_cow_index_pages;
 
-    fprintf(stderr, "moved %d\n", moved);
     /* if we moved, we need to redetach */
     if (moved) {
 	cows_index = 0; 
@@ -138,7 +139,7 @@ static int clic_write_cow()
 	    stringlen++;
 	}
     }
-    fprintf(stderr, "str %ld %ld\n", (long)stringlen, (long)cow_pages);
+    //fprintf(stderr, "str %ld %ld\n", (long)stringlen, (long)cow_pages);
     assert(stringlen == cow_pages);
     write(cowfilefd, (char*)&index_len, sizeof(uint32_t));
     
@@ -279,7 +280,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
     gettimeofday(&end, 0);
 
 #if defined(DEBUG)
-    if (logger) fprintf(logger, "uncompress %d %d %ld %ld (read took %ld - started %ld)\n", part, com->index, (long)offs[part], (long)sizes[part], (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
+    if (logger) fprintf(logger, "uncompress %d %d %ld-%ld %ld (read took %ld - started %ld)\n", part, com->index, (long)offs[part], (long)sizes[part], (long)readin, (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
 #endif
     if (!readin)
       return 0;
@@ -588,7 +589,8 @@ static int init_cow()
     fclose(cow);
 
     cow_index_pages = index_len / pagesize + 1;
-  
+    cow_pages = 0;
+
     return 0;
 }
 
@@ -597,20 +599,20 @@ int main(int argc, char *argv[])
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
     if (fuse_opt_parse(&args, NULL, clic_opt, clic_opt_proc) == -1) {
-      perror("fuse_opt_part");
-      return 1;
+	perror("fuse_opt_part");
+	return 1;
     }
 
     if (logfile) {
-      if (!strcmp(logfile, "-"))
-	logger = stderr;
-      else
-	logger = fopen(logfile, "w");
-      if (!logger) {
-	perror("open");
-        return 1;
-      }
-      free(logfile);
+	if (!strcmp(logfile, "-"))
+	    logger = stderr;
+	else
+	    logger = fopen(logfile, "w");
+	if (!logger) {
+	    perror("open");
+	    return 1;
+	}
+	free(logfile);
     }
 
     // not sure why but multiple threads make it slower
@@ -622,37 +624,37 @@ int main(int argc, char *argv[])
     }
 
     if (clicfs_read_pack(packfilename)) {
-      perror("read_pack");
-      return 1;
+	perror("read_pack");
+	return 1;
     }
 
     free(packfilename);
 
     if (cowfilename) {
       
-      if (access(cowfilename, R_OK))
-	init_cow();
+	if (access(cowfilename, R_OK))
+	    init_cow();
 
-      if (clicfs_read_cow(cowfilename)) {
-	if (!ignore_cow_errors)
-	  return 1;
+	if (clicfs_read_cow(cowfilename)) {
+	    if (!ignore_cow_errors)
+		return 1;
 	
-	init_cow();
-	if (clicfs_read_cow(cowfilename))
-	  return 1;
-      }
-      sparse_memory = 0; // ignore the option if we have a cow
+	    init_cow();
+	    if (clicfs_read_cow(cowfilename))
+		return 1;
+	}
+	sparse_memory = 0; // ignore the option if we have a cow
     }
 
     // fake for write
     if (sparse_memory) {
-      thefilesize = (thefilesize / pagesize * pagesize) + sparse_memory * 1024 * 1024;
-      size_t write_pages = thefilesize / pagesize;
-      blockmap = realloc(blockmap, sizeof(unsigned char*)*write_pages);
-      uint32_t i;
-      for (i = num_pages; i < write_pages; ++i)
-        blockmap[i] = 0;
-      num_pages = write_pages;
+	thefilesize = (thefilesize / pagesize * pagesize) + sparse_memory * 1024 * 1024;
+	size_t write_pages = thefilesize / pagesize;
+	blockmap = realloc(blockmap, sizeof(unsigned char*)*write_pages);
+	uint32_t i;
+	for (i = num_pages; i < write_pages; ++i)
+	    blockmap[i] = 0;
+	num_pages = write_pages;
     }
 
     uint32_t i;
@@ -681,6 +683,7 @@ int main(int argc, char *argv[])
 	free(cowfilename);
     if (cows)
 	free(cows);
+    clic_free_lzma();
 
     fuse_opt_free_args(&args);
 
