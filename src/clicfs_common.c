@@ -108,7 +108,6 @@ int clicfs_read_cow(const char *cowfilename)
     
     thefilesize = clic_readindex_fd64(cowfilefd);
     uint32_t newpages = thefilesize / pagesize;
-    printf("np %ld\n", (long)newpages);
     blockmap = realloc(blockmap, sizeof(unsigned char*)*newpages);
     uint32_t i;
     for (i = num_pages; i < newpages; ++i)
@@ -128,6 +127,7 @@ int clicfs_read_cow(const char *cowfilename)
     uint32_t index_len = clic_readindex_fd(cowfilefd);
     cow_index_pages = index_len / pagesize + 1;
 
+    fprintf(stderr, "read cow: np %ld cp %ld ip %ld\n", (long)newpages, (long)cow_pages, (long)cow_index_pages);
     return 0;
 }
 

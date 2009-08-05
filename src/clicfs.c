@@ -45,8 +45,11 @@ static uint32_t clic_find_next_cow()
     //fprintf(stderr, "clic_find_next %ld %ld\n", (long)cows_index, (long)cow_pages);
     if (cows_index > 0)
 	return cows[--cows_index];
-    return cow_pages++;
+    return cow_pages;
 }
+
+static int clic_detach(size_t block);
+static int clic_write_cow();
 
 static int clic_write_cow()
 {
@@ -55,30 +58,76 @@ static int clic_write_cow()
 
     fprintf(stderr, "cow detached %dMB\n", (int)(detached_allocated / 1024));
 
-    uint32_t indexlen = 0;
     uint32_t i;
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
 	if ( ptr && PTR_CLASS(ptr) == CLASS_MEMORY ) { // detached now
-	    uint32_t cowindex = clic_find_next_cow();
-	    lseek(cowfilefd, (cowindex + cow_index_pages) * pagesize, SEEK_SET);
+	    off_t cowindex = clic_find_next_cow() + cow_index_pages;
+	    fprintf(stderr, "writing to %ld %ld\n", cowindex, (long)i);
+	    off_t seeked = lseek(cowfilefd, cowindex * pagesize, SEEK_SET);
+	    assert(seeked == (off_t)(cowindex * pagesize));
 	    size_t ret = write(cowfilefd, blockmap[i], pagesize);
 	    assert(ret == pagesize);
 	    free(blockmap[i]);
 	    detached_allocated -= (pagesize / 1024);
 	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
+	    cow_pages++;
 	}
     }
 
     assert(!detached_allocated);
 
-    lseek(cowfilefd, cow_pages * pagesize, SEEK_SET);
+    off_t seeked = lseek(cowfilefd, 0, SEEK_SET); 
+    assert(seeked == 0);
     uint64_t stringlen = thefilesize;
-    indexlen += write(cowfilefd, (char*)&stringlen, sizeof(uint64_t));
+
+    char head[10];
+    sprintf(head, "CLICCOW%02d", DOENER_MAGIC);
+    uint32_t index_len = write(cowfilefd, head, 9);
+
+    index_len += write(cowfilefd, (char*)&stringlen, sizeof(uint64_t));
     stringlen = cow_pages;
-    indexlen += write(cowfilefd, (char*)&stringlen, sizeof(uint32_t));
+    index_len += write(cowfilefd, (char*)&stringlen, sizeof(uint32_t));
     stringlen = 0;
+
+    index_len += 2 * sizeof(uint32_t) * cow_pages;
+    uint32_t new_cow_index_pages = index_len / pagesize + 1;
+    uint32_t moving;
+    int moved = 0;
+
+    // should all be out
+    assert(cows_index == 0);
+
+    for (moving = cow_index_pages; moving < new_cow_index_pages; ++moving)
+    {
+	// we only have a map from memory to cow, so we need to 
+	// look up in reverse to find the page to move
+	// if this proves to be slow, we need even more memory
+	// to keep the reverse map
+	for (i = 0; i < num_pages; ++i)
+	{
+	    long ptr = (long)blockmap[i];
+	    if (PTR_CLASS(ptr) == CLASS_COW) { // block
+		if ((ptr >> 2) == moving) {
+		    fprintf(stderr, "moving %ld %ld\n", (long)moving, (long)i);
+		    clic_detach(i);
+		    moved = 1;
+		    break;
+		}
+	    }
+	}
+    }
+
+    cow_index_pages = new_cow_index_pages;
+
+    fprintf(stderr, "moved %d\n", moved);
+    /* if we moved, we need to redetach */
+    if (moved) {
+	cows_index = 0; 
+	return clic_write_cow();
+    }
+
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
@@ -86,12 +135,12 @@ static int clic_write_cow()
 	    uint32_t key = i, value = ptr >> 2;
 	    write(cowfilefd, (char*)&key, sizeof(uint32_t));
 	    write(cowfilefd, (char*)&value, sizeof(uint32_t));
-	    indexlen += 2 * sizeof(uint32_t);
 	    stringlen++;
 	}
     }
+    fprintf(stderr, "str %ld %ld\n", (long)stringlen, (long)cow_pages);
     assert(stringlen == cow_pages);
-    write(cowfilefd, (char*)&indexlen, sizeof(uint32_t));
+    write(cowfilefd, (char*)&index_len, sizeof(uint32_t));
     
     return 0;
 }
@@ -249,22 +298,22 @@ static const unsigned char *clic_uncompress(uint32_t part)
 
 static void clic_log_access(size_t block)
 {
-   if (!logger) return;
+    if (!logger) return;
 
-   static size_t firstblock = 0;
-   static ssize_t lastblock = -1;
+    static size_t firstblock = 0;
+    static ssize_t lastblock = -1;
 
-   if (lastblock >= 0 && block != (size_t)(lastblock + 1))
-   {
-       fprintf(logger, "access %ld+%ld\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8);
-       firstblock = block;
-   }
-   lastblock = block;
-   if (block > firstblock + 30) 
-   {
-      fprintf(logger, "access %ld+%ld\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8);
-      firstblock = block;
-   }
+    if (lastblock >= 0 && block != (size_t)(lastblock + 1))
+    {
+	fprintf(logger, "access %ld+%ld\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8);
+	firstblock = block;
+    }
+    lastblock = block;
+    if (block > firstblock + 30) 
+    {
+	fprintf(logger, "access %ld+%ld\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8);
+	firstblock = block;
+    }
 }
 
 static size_t clic_read_block(char *buf, size_t block);
@@ -286,8 +335,10 @@ static int clic_detach(size_t block)
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 
 	clic_read_block(newptr, block);
-	if (PTR_CLASS(ptr) == CLASS_COW) // we need to mark the place in the cow obsolete
+	if (PTR_CLASS(ptr) == CLASS_COW) { // we need to mark the place in the cow obsolete
 	    cows[cows_index++] = (long)ptr >> 2;
+	    cow_pages--;
+	}
 	blockmap[block] = (unsigned char*)newptr;
 
 	return 1;
@@ -373,7 +424,8 @@ static size_t clic_read_block(char *buf, size_t block)
     }
 
     if (PTR_CLASS(ptr) == CLASS_COW) {
-	lseek(cowfilefd, (ptr >> 2) * pagesize, SEEK_SET);
+	off_t target = ptr >> 2;
+	lseek(cowfilefd, target * pagesize, SEEK_SET);
 	return read(cowfilefd, buf, pagesize);
     }
 
@@ -513,31 +565,31 @@ int clic_opt_proc(void *data, const char *arg, int key, struct fuse_args *outarg
 
 static int init_cow()
 {
-  FILE *cow = fopen(cowfilename, "w");
-  if (!cow) {
-    perror("opening cow");
-    return 1;
-  }
-  uint64_t bigfilesize = (thefilesize / pagesize * pagesize);
-  if (bigfilesize < thefilesize)
-      thefilesize += pagesize;
-  bigfilesize += sparse_memory * 1024 * 1024;
+    FILE *cow = fopen(cowfilename, "w");
+    if (!cow) {
+	perror("opening cow");
+	return 1;
+    }
+    uint64_t bigfilesize = (thefilesize / pagesize * pagesize);
+    if (bigfilesize < thefilesize)
+	thefilesize += pagesize;
+    bigfilesize += sparse_memory * 1024 * 1024;
   
-  assert( DOENER_MAGIC < 100 );
-  int index_len = fprintf(cow, "CLICCOW%02d", DOENER_MAGIC );
+    assert( DOENER_MAGIC < 100 );
+    int index_len = fprintf(cow, "CLICCOW%02d", DOENER_MAGIC );
 
-  index_len += fwrite((char*)&bigfilesize, 1, sizeof(uint64_t), cow);
-  uint32_t stringlen = 0;
-  // there are 0 blocks
-  index_len += fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
-  // the whole index is 12 bytes long
-  stringlen = index_len + sizeof(uint32_t);
-  index_len += fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
-  fclose(cow);
+    index_len += fwrite((char*)&bigfilesize, 1, sizeof(uint64_t), cow);
+    uint32_t stringlen = 0;
+    // there are 0 blocks
+    index_len += fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
+    // the whole index is 12 bytes long
+    stringlen = index_len + sizeof(uint32_t);
+    index_len += fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
+    fclose(cow);
 
-  cow_index_pages = index_len / pagesize + 1;
+    cow_index_pages = index_len / pagesize + 1;
   
-  return 0;
+    return 0;
 }
 
 int main(int argc, char *argv[])
