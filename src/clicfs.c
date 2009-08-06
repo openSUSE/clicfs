@@ -45,7 +45,7 @@ static uint32_t clic_find_next_cow()
     //fprintf(stderr, "clic_find_next %ld %ld\n", (long)cows_index, (long)cow_pages);
     if (cows_index > 0)
 	return cows[--cows_index];
-    return cow_pages;
+    return cow_pages + cow_index_pages;
 }
 
 static int clic_detach(size_t block);
@@ -63,7 +63,7 @@ static int clic_write_cow()
     {
 	long ptr = (long)blockmap[i];
 	if ( ptr && PTR_CLASS(ptr) == CLASS_MEMORY ) { // detached now
-	    off_t cowindex = clic_find_next_cow() + cow_index_pages;
+	    off_t cowindex = clic_find_next_cow();
 	    fprintf(stderr, "writing to %ld %ld\n", cowindex, (long)i);
 	    off_t seeked = lseek(cowfilefd, cowindex * pagesize, SEEK_SET);
 	    assert(seeked == (off_t)(cowindex * pagesize));
@@ -227,7 +227,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
 {
     struct buffer_combo *com;
     
-    if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
+    //if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
 
     pthread_mutex_lock(&picker);
     int index = -1;
@@ -337,6 +337,7 @@ static int clic_detach(size_t block)
 
 	clic_read_block(newptr, block);
 	if (PTR_CLASS(ptr) == CLASS_COW) { // we need to mark the place in the cow obsolete
+	    fprintf(stderr, "detach block %ld (was %ld)\n", (long)block, (long)ptr >> 2);
 	    cows[cows_index++] = (long)ptr >> 2;
 	    cow_pages--;
 	}
