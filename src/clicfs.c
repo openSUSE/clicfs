@@ -42,7 +42,6 @@ static struct timeval start;
 
 static uint32_t clic_find_next_cow()
 {
-    //fprintf(stderr, "clic_find_next %ld %ld\n", (long)cows_index, (long)cow_pages);
     if (cows_index > 0)
 	return cows[--cows_index];
     return cow_pages + cow_index_pages;
@@ -56,7 +55,7 @@ static int clic_write_cow()
     if (!cowfilename || cowfile_ro == 1 || !detached_allocated)
 	return 0;
 
-    fprintf(stderr, "cow detached %dMB\n", (int)(detached_allocated / 1024));
+    if (logger) fprintf(logger, "cow detached %dMB\n", (int)(detached_allocated / 1024));
 
     uint32_t i;
     for (i = 0; i < num_pages; ++i)
@@ -64,7 +63,6 @@ static int clic_write_cow()
 	long ptr = (long)blockmap[i];
 	if ( ptr && PTR_CLASS(ptr) == CLASS_MEMORY ) { // detached now
 	    off_t cowindex = clic_find_next_cow();
-	    fprintf(stderr, "writing to %ld %ld\n", cowindex, (long)i);
 	    off_t seeked = lseek(cowfilefd, cowindex * pagesize, SEEK_SET);
 	    assert(seeked == (off_t)(cowindex * pagesize));
 	    size_t ret = write(cowfilefd, blockmap[i], pagesize);
@@ -110,7 +108,7 @@ static int clic_write_cow()
 	    long ptr = (long)blockmap[i];
 	    if (PTR_CLASS(ptr) == CLASS_COW) { // block
 		if ((ptr >> 2) == moving) {
-		    fprintf(stderr, "moving %ld %ld\n", (long)moving, (long)i);
+		    if (logger) fprintf(logger, "moving %ld %ld\n", (long)moving, (long)i);
 		    clic_detach(i);
 		    moved++;
 		    break;
@@ -139,7 +137,6 @@ static int clic_write_cow()
 	    stringlen++;
 	}
     }
-    //fprintf(stderr, "str %ld %ld\n", (long)stringlen, (long)cow_pages);
     assert(stringlen == cow_pages);
     write(cowfilefd, (char*)&index_len, sizeof(uint32_t));
     
@@ -337,7 +334,7 @@ static int clic_detach(size_t block)
 
 	clic_read_block(newptr, block);
 	if (PTR_CLASS(ptr) == CLASS_COW) { // we need to mark the place in the cow obsolete
-	    fprintf(stderr, "detach block %ld (was %ld)\n", (long)block, (long)ptr >> 2);
+	    if (logger) fprintf(logger, "detach block %ld (was %ld)\n", (long)block, (long)ptr >> 2);
 	    cows[cows_index++] = (long)ptr >> 2;
 	    cow_pages--;
 	}

@@ -104,8 +104,6 @@ int clicfs_read_cow(const char *cowfilename)
     if (strcmp(head,expected)) {
 	fprintf(stderr, "wrong magic: %s vs %s\n", head, expected);
 	return 1;
-    } else {
-	fprintf(stderr, "good cow\n");
     }
     
     thefilesize = clic_readindex_fd64(cowfilefd);
@@ -129,7 +127,6 @@ int clicfs_read_cow(const char *cowfilename)
     uint32_t index_len = clic_readindex_fd(cowfilefd);
     cow_index_pages = index_len / pagesize + 1;
 
-    fprintf(stderr, "read cow: np %ld cp %ld ip %ld\n", (long)newpages, (long)cow_pages, (long)cow_index_pages);
     return 0;
 }
 
@@ -249,13 +246,17 @@ void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t re
     lzma_ret ret;
     while (1) {
 	ret = lzma_code(&strm, LZMA_RUN);
-	fprintf(stderr, "ret %d %ld %ld\n", ret, strm.avail_in, strm.avail_out );
+	//fprintf(stderr, "ret %d %ld %ld\n", ret, strm.avail_in, strm.avail_out );
 	if (ret != LZMA_OK)
 	    break;
 	if (!strm.avail_in)
 	  break;
     }
 
+    if (ret == LZMA_DATA_ERROR) {
+	fprintf(stderr, "lzma data corrupt!\n");
+	exit(1);
+    }
     assert (ret == LZMA_OK);
     /* don't use lzma_end (will free buffers) or LZMA_FINISH (will forbid any new use) */
 }
