@@ -87,6 +87,7 @@ static size_t compress(int preset, unsigned char *in, size_t insize, unsigned ch
     assert (ret == LZMA_STREAM_END);
     lzma_end(&strm);
 
+    //fprintf( stderr,  "compress %ld %ld %ld\n", insize, outsize, strm.total_out );
     return strm.total_out;
 }
 
@@ -140,11 +141,11 @@ struct queue *queue_init(int size)
         return queue;
 }
 
-int queue_length(struct queue *queue) 
+int queue_length(struct queue *queue)
 {
    pthread_mutex_lock(&queue->mutex);
    int ret = (queue->writep - queue->readp + queue->size) % queue->size;
-   pthread_mutex_unlock(&queue->mutex);  
+   pthread_mutex_unlock(&queue->mutex);
    return ret;
 }
 
@@ -182,6 +183,7 @@ void *queue_get(struct queue *queue)
 
 // the number of really saved parts
 uint32_t parts = 0;
+uint32_t largeparts = 0;
 
 struct inbuf_struct {
     size_t readin, totalin;
@@ -212,17 +214,26 @@ void *reader(void *arg)
         int currentblocks = 0;
 
         inbuf_struct *in = new inbuf_struct();
-        in->inbuf = new unsigned char[blocksize*pagesize];
+        in->inbuf = new unsigned char[100*blocksize*pagesize];
         in->readin = 0;
         in->totalin = 0;
         in->lastblock = false;
 
-        while ( currentblocks < blocksize ) {
+        size_t currentblocksize = blocksize;
+
+        if (rindex + 1 < pindex) {
+            currentblocksize = blocksize * 100;
+            largeparts++;
+        }
+
+        //fprintf( stderr, "cbl %ld %ld %ld\n", currentblocksize, rindex, pindex );
+
+        while ( currentblocks < currentblocksize ) {
             off_t cindex = 0;
             if (rindex < pindex) {
                 cindex = ublocks[rindex];
             } else {
-                while (found[uindex] && uindex < num_pages)  uindex++;
+                while (found[uindex] && uindex < num_pages) uindex++;
                 assert( uindex < num_pages );
                 if ( uindex < num_pages ) {
                     cindex = uindex;
@@ -291,16 +302,16 @@ void *deflator(void *arg)
             inbuf_struct *in = (inbuf_struct*)queue_get(from_reader);
 
             outbuf_struct *out = new outbuf_struct();
-            out->outbuf = new unsigned char[blocksize*pagesize + 300];
+            out->outbuf = new unsigned char[100*blocksize*pagesize + 300];
 //	    fprintf( stderr,  "compress start %ld %d %x %ld\n", pthread_self(), in->part, in->inbuf, in->readin );
-            out->outsize = compress(preset, in->inbuf, in->readin, out->outbuf, blocksize*pagesize + 300);
+            out->outsize = compress(preset, in->inbuf, in->readin, out->outbuf, 100*blocksize*pagesize + 300);
             out->part = in->part;
             out->insize = in->readin;
             out->bpp = in->bpp;
             out->lastblock = in->lastblock;
             out->totalin = in->totalin;
 
-//            fprintf( stderr,  "compress %ld %d %x %ld -> %ld\n", pthread_self(), in->part, in->inbuf, in->readin, out->outsize );
+            //fprintf( stderr,  "compress %ld %d %x %ld -> %ld\n", pthread_self(), in->part, in->inbuf, in->readin, out->outsize );
             delete [] in->inbuf;
             delete in;
 
@@ -388,6 +399,7 @@ int writer(size_t oparts, off_t index_off, FILE *out, uint64_t *sizes, uint64_t 
         while ( comps[lastpart + 1] ) {
             comp = comps[++lastpart];
 
+            fprintf( stderr,  "comp %ld %ld %ld\n", comp->part, ( long )comp->totalin, ( long )comp->outsize );
             sizes[comp->part] = comp->outsize;
             offs[comp->part] = total_out + index_off;
             total_in += comp->totalin;
@@ -403,13 +415,13 @@ int writer(size_t oparts, off_t index_off, FILE *out, uint64_t *sizes, uint64_t 
                         lastpercentage+1, (long)comp->part,
                         (int)(total_out * 100 / total_in), (current.tv_sec - start.tv_sec) * 1000 + ((current.tv_usec - start.tv_usec) / 1000 ));
                 start.tv_sec = current.tv_sec;
-		start.tv_usec = current.tv_usec;
+                start.tv_usec = current.tv_usec;
                 lastpercentage++;
             }
 
             if ( comp->lastblock ) {
                 delete comp;
-		goto out;
+                goto out;
             }
             comps[comp->part] = 0;
             delete comp;
@@ -544,7 +556,13 @@ int main(int argc, char **argv)
     if (!writeindex(out, oparts )) return 1;
     index_off += sizeof(uint32_t);
 
+    if (!writeindex(out, largeparts )) return 1;
+    index_off += sizeof(uint32_t);
+
     if (!writeindex(out, blocksize )) return 1;
+    index_off += sizeof(uint32_t);
+
+    if (!writeindex(out, 100 * blocksize )) return 1;
     index_off += sizeof(uint32_t);
 
     if (!writeindex(out, pagesize )) return 1;

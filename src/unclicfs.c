@@ -34,8 +34,10 @@ static size_t clic_read_block(unsigned char *buf, off_t block)
     off_t mapped_block = clic_map_block(block);
     assert(mapped_block < (off_t)num_pages);
 
-    off_t part = (off_t)(mapped_block / bsize);
+    off_t part, off;
+    clic_find_block( mapped_block, &part, &off);
     assert(part < parts);
+
     if ( part != lastpart) {
 	size_t readin = clic_readpart(inbuf, part);
 	if (readin == 0) {
@@ -45,7 +47,7 @@ static size_t clic_read_block(unsigned char *buf, off_t block)
 	lastpart = part;
     }
 
-    memcpy(buf, outbuf + pagesize * (mapped_block % bsize), pagesize);
+    memcpy(buf, outbuf + pagesize * off, pagesize);
 
     return pagesize;
 }
@@ -60,8 +62,8 @@ int main(int argc, char *argv[])
     if (clicfs_read_pack(packfilename))
       return 1;
 
-    inbuf = malloc(bsize*pagesize + 300);
-    outbuf = malloc(bsize*pagesize);
+    inbuf = malloc(blocksize_large*pagesize + 300);
+    outbuf = malloc(blocksize_large*pagesize);
 
     FILE *outfile = fopen(thefile, "w");
 

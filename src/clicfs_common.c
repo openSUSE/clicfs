@@ -37,8 +37,10 @@ size_t pagesize = 4096;
 uint64_t *sizes = 0;
 uint64_t *offs = 0;
 uint32_t parts = 0;
+uint32_t largeparts = 0;
 uint32_t pindex = 0;
-size_t bsize = 0;
+size_t blocksize_large = 0;
+size_t blocksize_small = 0;
 unsigned char **blockmap;
 uint32_t num_pages = 0;
 uint32_t cow_pages = 0;
@@ -159,12 +161,16 @@ int clicfs_read_pack(const char *packfilename)
     thefile[stringlen] = 0;
 
     uint64_t oparts = clic_readindex_file(packfile);
-    bsize = clic_readindex_file(packfile);
+    largeparts = clic_readindex_file(packfile);
+    blocksize_small = clic_readindex_file(packfile);
+    blocksize_large = clic_readindex_file(packfile);
     pagesize = clic_readindex_file(packfile);
-    thefilesize = oparts * bsize * pagesize;
+    thefilesize = oparts * blocksize_small * pagesize;
     preset = clic_readindex_file(packfile);
     num_pages = clic_readindex_file(packfile);
     blockmap = malloc(sizeof(unsigned char*)*num_pages);
+
+    fprintf(stderr, "parts %ld largeparts %ld bl %ld bs %ld\n", oparts, largeparts, blocksize_large, blocksize_small);
 
     uint32_t i;
     for (i = 0; i < num_pages; ++i) {
@@ -239,7 +245,8 @@ void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t re
     strm.next_in = in;
     strm.avail_in = readin;
     strm.next_out = out;
-    strm.avail_out = bsize*pagesize;
+    // TODO: this doesn't need to be large all the time
+    strm.avail_out = blocksize_large*pagesize;
     strm.total_in = 0;
     strm.total_out = 0;
 
@@ -264,4 +271,17 @@ void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t re
 void clic_free_lzma()
 {
     lzma_end(&strm);
+}
+
+void clic_find_block( off_t block, off_t *part, off_t *offset )
+{
+    // we have X blocks in large parts and Y blocks in appendix
+    if (block > (off_t)(largeparts * blocksize_large) )
+    {
+	*part = (block - largeparts * blocksize_large) / blocksize_small + largeparts;
+	*offset = block % blocksize_small;
+    } else {
+	*part = block / blocksize_large;
+	*offset = block % blocksize_large;
+    }
 }

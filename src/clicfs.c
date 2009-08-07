@@ -301,6 +301,7 @@ static void clic_log_access(size_t block)
     static size_t firstblock = 0;
     static ssize_t lastblock = -1;
 
+    fprintf(logger, "a %ld\n", (long)block);
     if (lastblock >= 0 && block != (size_t)(lastblock + 1))
     {
 	fprintf(logger, "access %ld+%ld\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8);
@@ -432,13 +433,14 @@ static size_t clic_read_block(char *buf, size_t block)
     assert(block < num_pages);
 
     off_t mapped_block = clic_map_block(block);
-
-    size_t part = (size_t)(mapped_block / bsize);
+    
+    off_t part, off;
+    clic_find_block( mapped_block, &part, &off);
     assert(part < parts);
 
     const unsigned char *partbuf = clic_uncompress(part);
     assert(partbuf);
-    memcpy(buf, partbuf + pagesize * (mapped_block % bsize), pagesize);
+    memcpy(buf, partbuf + pagesize * off, pagesize);
 
     return pagesize;
 }
@@ -510,7 +512,7 @@ static void clic_init_buffer(int i)
     coms[i].used = 0;
     coms[i].index = i + 1;
     coms[i].free = 1;
-    coms[i].out_buffer = malloc(bsize*pagesize);
+    coms[i].out_buffer = malloc(blocksize_large*pagesize);
     pthread_mutex_init(&coms[i].lock, 0);
 }
 
@@ -657,7 +659,7 @@ int main(int argc, char *argv[])
 
     uint32_t i;
  
-    com_count = 6000000 / (bsize*pagesize); // get 6MB of cache
+    com_count = 60000000 / (blocksize_large*pagesize); // get 60MB of cache
     coms = malloc(sizeof(struct buffer_combo) * com_count);
     for (i = 0; i < com_count; ++i)
 	clic_init_buffer(i);
