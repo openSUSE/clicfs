@@ -202,72 +202,210 @@ static int clic_open(const char *path, struct fuse_file_info *fi)
 }
 
 struct buffer_combo {
+    // the buffer of the part
     unsigned char *out_buffer;
-    
     uint32_t part;
-    pthread_mutex_t lock;
-    int free;
-    int index;
-    int used;
+    time_t last_used;
+    struct buffer_combo *next_by_part;
+    struct buffer_combo *prev_by_part;
+    struct buffer_combo *next_by_use;
+    struct buffer_combo *prev_by_use;
 };
 
-static int used_counter = 0;
-
-struct buffer_combo *coms;    
-static unsigned int com_count = 1;
+// first
+struct buffer_combo *coms_sort_by_part = 0;
+struct buffer_combo *coms_sort_by_use_first = 0;
+struct buffer_combo *coms_sort_by_use_last = 0;
+static unsigned int com_count = 0;
 
 pthread_mutex_t picker = PTHREAD_MUTEX_INITIALIZER, seeker = PTHREAD_MUTEX_INITIALIZER;;
 
 FILE *pack;
 
-static const unsigned char *clic_uncompress(uint32_t part)
+static void clic_insert_after(struct buffer_combo *prev, struct buffer_combo *com)
 {
-    struct buffer_combo *com;
-    
-    //if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
+    assert(prev->part < com->part);
+    com->next_by_part = prev->next_by_part;
+    prev->next_by_part = com;
+    com->prev_by_part = prev;
+    if (com->next_by_part)
+	com->next_by_part->prev_by_part = com;
+}
 
-    pthread_mutex_lock(&picker);
-    int index = -1;
-    unsigned int i;
-    for (i = 0; i < com_count; ++i)
-    {
-	if (coms[i].part == part)
-	{
-	    index = i;
-	    break;
-	}
+static void clic_append_by_use(struct buffer_combo *com)
+{
+    assert(coms_sort_by_use_last);
+    coms_sort_by_use_last->next_by_use = com;
+    com->prev_by_use = coms_sort_by_use_last;
+    com->next_by_use = 0;
+    coms_sort_by_use_last = com;
+}
+
+/** I wrote this while watching TV, I know it sucks */
+static void clic_insert_com(struct buffer_combo *com)
+{
+    if (!coms_sort_by_part) {
+	assert(!coms_sort_by_use_first);
+	assert(!coms_sort_by_use_last);
+	coms_sort_by_part = com;
+	coms_sort_by_use_first = com;
+	coms_sort_by_use_last = com;
+	com->next_by_part = 0;
+	com->next_by_use = 0;
+	com->prev_by_part = 0;
+	com->prev_by_use = 0;
+	com_count++;
+	return;
     }
-    if (index == -1)
-    {
-	index = 0;
-	for (i = 0; i < com_count -1; ++i)
+    struct buffer_combo *first = coms_sort_by_part;
+    while (first) {
+	if (first->part < com->part)
 	{
-	    if (coms[i].free) {
-		index = i;
+	    if (!first->next_by_part) {
+		clic_insert_after(first, com);
 		break;
+	    } else {
+		if (first->next_by_part->part < com->part)
+		    first = first->next_by_part;
+		else {
+		    clic_insert_after(first, com);
+		    break;
+		}
 	    }
 	}
-	for (i = index + 1; i < com_count; ++i)
-	{
-	    if (coms[i].free && coms[index].used > coms[i].used)
-		index = i;
-	}
     }
-    com = coms + index;
-    pthread_mutex_lock(&com->lock);
-    com->free = 0;
-    com->used = used_counter++;
-    pthread_mutex_unlock(&picker);
+    clic_append_by_use(com);
+}
 
-    if (com->part == part)
+/**
+ * the use list is sorted from oldest to newest buffer. This function switches two
+ elememnts from P->F->S->N to P->S->F->N (first is F and second is S)
+*/
+static void clic_switch_use(struct buffer_combo *first, struct buffer_combo *second)
+{
+    assert(first->last_used > second->last_used);
+    struct buffer_combo *n = second->next_by_use;
+    struct buffer_combo *p = first->prev_by_use;
+
+    second->next_by_use = first;
+    first->next_by_use = n;
+    if (p)
+	p->next_by_use = second;
+    
+    second->prev_by_use = p;
+    if (n)
+	n->prev_by_use = first;
+    first->prev_by_use = second;
+    if (coms_sort_by_use_last == second)
+	coms_sort_by_use_last = first;
+    if (coms_sort_by_use_first == first)
+	coms_sort_by_use_first = second;
+}
+
+static int clic_resort_by_use(struct buffer_combo *c)
+{
+    // the assertion of the list is prev->lu < next->lu
+    if (c->prev_by_use && c->prev_by_use->last_used > c->last_used)
+    {
+	clic_switch_use(c->prev_by_use, c);
+	clic_resort_by_use(c);
+	return 1;
+    }
+
+    if (c->next_by_use && c->next_by_use->last_used < c->last_used)
+    {
+	clic_switch_use(c, c->next_by_use);
+	clic_resort_by_use(c);
+	return 1;
+    }
+
+    return 0;
+}
+
+static void clic_dump_use()
+{
+    if (!logger)
+	return;
+
+    struct buffer_combo *c =  coms_sort_by_use_first;
+    fprintf(logger, "dump ");
+    while (c) {
+	fprintf(logger, "%ld ", (long)c->part);
+	c = c->next_by_use;
+    }
+    fprintf(logger, "\n");
+}
+
+static struct buffer_combo *clic_pick_part(uint32_t part)
+{
+    pthread_mutex_lock(&picker);
+    struct buffer_combo *com = coms_sort_by_part;
+    while (com && com->part < part) {
+	com = com->next_by_part;
+	if (com && com->part == part)
+	    break;
+    }
+    if (com && com->part != part)
+	com = 0;
+    pthread_mutex_unlock(&picker);
+    return com;
+}
+
+static void clic_free_com(struct buffer_combo *com)
+{
+    if (coms_sort_by_use_first == com)
+	coms_sort_by_use_first = com->next_by_use;
+    assert(com != coms_sort_by_use_last);
+    // P->C->N -> P->N
+    struct buffer_combo *n = com->next_by_use;
+    struct buffer_combo *p = com->prev_by_use;
+    if (n)
+	n->prev_by_use = p;
+    if (p)
+	p->next_by_use = n;
+
+    if (coms_sort_by_part == com)
+	coms_sort_by_part = com->next_by_part;
+    
+    n = com->next_by_part;
+    p = com->prev_by_part;
+    if (n)
+	n->prev_by_part = p;
+    if (p)
+	p->next_by_part = n;
+
+    free(com->out_buffer);
+    free(com);
+}
+
+static const unsigned char *clic_uncompress(uint32_t part)
+{
+    //if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
+    time_t now = time(0);
+    struct buffer_combo *com = clic_pick_part(part);
+        
+    if (com)
     {
 	const unsigned char *buf = com->out_buffer;
-	com->free = 1;
-	pthread_mutex_unlock(&com->lock);
+	com->last_used = now;
+	if (clic_resort_by_use(com) && 1)
+	    clic_dump_use();
+	// if the oldest is 30s, drop it 
+	while (now - coms_sort_by_use_first->last_used > 30) {
+	    clic_free_com(coms_sort_by_use_first);
+	}
 	return buf;
     }
 
+    com = malloc(sizeof(struct buffer_combo));
+    if (part < largeparts)
+	com->out_buffer = malloc(blocksize_large*pagesize);
+    else
+	com->out_buffer = malloc(blocksize_small*pagesize);
+    com->last_used = now;
     com->part = part;
+
+    clic_insert_com(com);
 
     pthread_mutex_lock(&seeker);
     unsigned char *inbuffer = malloc(sizes[part]);
@@ -277,7 +415,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
     gettimeofday(&end, 0);
 
 #if defined(DEBUG)
-    if (logger) fprintf(logger, "uncompress %d %d %ld-%ld %ld (read took %ld - started %ld)\n", part, com->index, (long)offs[part], (long)sizes[part], (long)readin, (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
+    if (logger) fprintf(logger, "uncompress %d %ld-%ld %ld (read took %ld - started %ld)\n", part, (long)offs[part], (long)sizes[part], (long)readin, (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
 #endif
     if (!readin)
       return 0;
@@ -285,11 +423,6 @@ static const unsigned char *clic_uncompress(uint32_t part)
 
     clic_decompress_part(com->out_buffer, inbuffer, readin);
     free(inbuffer);
-
-    com->part = part;
-    com->free = 1;
-
-    pthread_mutex_unlock(&com->lock);
 
     return com->out_buffer;
 }
@@ -505,16 +638,6 @@ static struct fuse_operations clic_oper = {
     .fsync = clic_fsync
 };
   
-static void clic_init_buffer(int i)
-{
-    coms[i].part = -1;
-    coms[i].used = 0;
-    coms[i].index = i + 1;
-    coms[i].free = 1;
-    coms[i].out_buffer = malloc(blocksize_large*pagesize);
-    pthread_mutex_init(&coms[i].lock, 0);
-}
-
 char *packfilename = 0;
 char *logfile = 0;
 int ignore_cow_errors = 0;
@@ -656,13 +779,6 @@ int main(int argc, char *argv[])
 	num_pages = write_pages;
     }
 
-    uint32_t i;
- 
-    com_count = 60000000 / (blocksize_large*pagesize); // get 60MB of cache
-    coms = malloc(sizeof(struct buffer_combo) * com_count);
-    for (i = 0; i < com_count; ++i)
-	clic_init_buffer(i);
-
     gettimeofday(&start, 0);
     int ret = fuse_main(args.argc, args.argv, &clic_oper, NULL);
     clic_write_cow();
@@ -671,9 +787,6 @@ int main(int argc, char *argv[])
     if (logger) fclose(logger);
 
     free(blockmap);
-    for (i = 0; i < com_count; ++i)
-	free(coms[i].out_buffer);
-    free(coms);
     free(sizes);
     free(offs);
     fclose(packfile);
