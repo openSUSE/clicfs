@@ -161,7 +161,6 @@ int clicfs_read_pack(const char *packfilename)
     thefile[stringlen] = 0;
 
     uint64_t oparts = clic_readindex_file(packfile);
-    largeparts = clic_readindex_file(packfile);
     blocksize_small = clic_readindex_file(packfile);
     blocksize_large = clic_readindex_file(packfile);
     pagesize = clic_readindex_file(packfile);
@@ -170,8 +169,6 @@ int clicfs_read_pack(const char *packfilename)
     num_pages = clic_readindex_file(packfile);
     blockmap = malloc(sizeof(unsigned char*)*num_pages);
 
-    fprintf(stderr, "parts %ld largeparts %ld bl %ld bs %ld\n", oparts, largeparts, blocksize_large, blocksize_small);
-
     uint32_t i;
     for (i = 0; i < num_pages; ++i) {
 	// make sure it's odd to diff between pointer and block
@@ -179,8 +176,11 @@ int clicfs_read_pack(const char *packfilename)
     }
 
     parts = clic_readindex_file(packfile);
+    largeparts = clic_readindex_file(packfile);
     sizes = malloc(sizeof(uint64_t)*parts);
     offs = malloc(sizeof(uint64_t)*parts);
+
+    fprintf(stderr, "parts %ld largeparts %ld bl %ld bs %ld\n", (long)parts, (long)largeparts, (long)blocksize_large, (long)blocksize_small);
 
     for (i = 0; i < parts; ++i)
     {
@@ -279,9 +279,10 @@ void clic_find_block( off_t block, off_t *part, off_t *offset )
     if (block > (off_t)(largeparts * blocksize_large) )
     {
 	*part = (block - largeparts * blocksize_large) / blocksize_small + largeparts;
-	*offset = block % blocksize_small;
+	*offset = (block - largeparts * blocksize_large) % blocksize_small;
     } else {
 	*part = block / blocksize_large;
 	*offset = block % blocksize_large;
     }
+    //fprintf(stderr, "clic_find_block %ld => %ld %ld\n", block, *part, *offset);
 }

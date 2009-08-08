@@ -36,10 +36,12 @@ static size_t clic_read_block(unsigned char *buf, off_t block)
 
     off_t part, off;
     clic_find_block( mapped_block, &part, &off);
+    fprintf(stderr, "rb %ld %ld %ld %ld\n", block, mapped_block, part, off);
     assert(part < parts);
 
     if ( part != lastpart) {
 	size_t readin = clic_readpart(inbuf, part);
+	fprintf(stderr, "read part %ld %ld\n", part, readin);
 	if (readin == 0) {
 	    return 0;
 	}

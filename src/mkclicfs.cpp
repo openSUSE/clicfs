@@ -399,7 +399,7 @@ int writer(size_t oparts, off_t index_off, FILE *out, uint64_t *sizes, uint64_t 
         while ( comps[lastpart + 1] ) {
             comp = comps[++lastpart];
 
-            fprintf( stderr,  "comp %ld %ld %ld\n", comp->part, ( long )comp->totalin, ( long )comp->outsize );
+            //fprintf( stderr,  "comp %ld %ld %ld\n", comp->part, ( long )comp->totalin, ( long )comp->outsize );
             sizes[comp->part] = comp->outsize;
             offs[comp->part] = total_out + index_off;
             total_in += comp->totalin;
@@ -516,6 +516,10 @@ int main(int argc, char **argv)
             if (strncmp(line, "access ", 5))
                 continue;
             if (sscanf(line, "access %ld+%ld", &offset, &size) == 2) {
+                // the access data is in blocks - so we can compare it with
+                // blktrace, but we need pages here
+                offset /= 8;
+                size /= 8;
                 for (i = 0; i <= size; i++) {
                     if (offset + i < num_pages && found[offset+i] == 0) {
                         ublocks[pindex++] = offset + i;
@@ -556,9 +560,6 @@ int main(int argc, char **argv)
     if (!writeindex(out, oparts )) return 1;
     index_off += sizeof(uint32_t);
 
-    if (!writeindex(out, largeparts )) return 1;
-    index_off += sizeof(uint32_t);
-
     if (!writeindex(out, blocksize )) return 1;
     index_off += sizeof(uint32_t);
 
@@ -579,7 +580,8 @@ int main(int argc, char **argv)
     blockindex = new uint32_t[num_pages];
 
     off_t index_part = index_off;
-    index_off += 2 * oparts * sizeof(uint64_t) + sizeof(uint32_t);
+    // oparts it the size of the table and we need place for parts and largeparts
+    index_off += 2 * oparts * sizeof(uint64_t) + sizeof(uint32_t) * 2;
     fseeko(out, index_off, SEEK_SET);
 
     initialise_threads();
@@ -599,6 +601,7 @@ int main(int argc, char **argv)
     }
 
     if (!writeindex(out, parts)) return 1;
+    if (!writeindex(out, largeparts )) return 1;
 
     for (i = 0; i < parts; ++i) {
         if (fwrite((char*)(sizes + i), sizeof(uint64_t), 1, out) != 1 ||
