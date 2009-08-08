@@ -26,7 +26,8 @@ extern int preset;
 extern FILE *packfile;
 extern int cowfilefd;
 
-#define DOENER_MAGIC 1
+// magic 2 added large parts
+#define DOENER_MAGIC 2
 
 #define PTR_CLASS(x) ((long)x & 0x3)
 
@@ -39,9 +40,15 @@ extern uint64_t thefilesize;
 extern size_t pagesize;
 extern uint64_t *sizes;
 extern uint64_t *offs;
+// the number of parts all in all
 extern uint32_t parts;
+// how many parts contain many blocks, the rest is small
+extern uint32_t largeparts;
 extern uint32_t pindex;
-extern size_t bsize;
+// the number of pages in a part (~32)
+extern size_t blocksize_small;
+// the number of pages in a large part (~3200)
+extern size_t blocksize_large;
 // the number of pages in total (full image)
 extern uint32_t num_pages;
 // the number of pages marked as CLASS_COW
@@ -66,3 +73,5 @@ extern size_t clic_readpart(unsigned char *buffer, int part);
 extern off_t clic_map_block(off_t block);
 extern uint32_t clic_readindex_fd(int fd );
 extern void clic_free_lzma();
+
+extern void clic_find_block( off_t block, off_t *part, off_t *offset );

@@ -25,30 +25,8 @@
 #include <assert.h>
 #include <stdlib.h>
 
-static off_t lastpart = (off_t)-1;
 static unsigned char *inbuf = 0;
 static unsigned char *outbuf = 0;
-
-static size_t clic_read_block(unsigned char *buf, off_t block)
-{
-    off_t mapped_block = clic_map_block(block);
-    assert(mapped_block < (off_t)num_pages);
-
-    off_t part = (off_t)(mapped_block / bsize);
-    assert(part < parts);
-    if ( part != lastpart) {
-	size_t readin = clic_readpart(inbuf, part);
-	if (readin == 0) {
-	    return 0;
-	}
-	clic_decompress_part(outbuf, inbuf, readin);
-	lastpart = part;
-    }
-
-    memcpy(buf, outbuf + pagesize * (mapped_block % bsize), pagesize);
-
-    return pagesize;
-}
 
 int main(int argc, char *argv[])
 {
@@ -60,27 +38,48 @@ int main(int argc, char *argv[])
     if (clicfs_read_pack(packfilename))
       return 1;
 
-    inbuf = malloc(bsize*pagesize + 300);
-    outbuf = malloc(bsize*pagesize);
+    inbuf = malloc(blocksize_large*pagesize + 300);
+    outbuf = malloc(blocksize_large*pagesize);
 
     FILE *outfile = fopen(thefile, "w");
 
     size_t delta = num_pages / 100;
 
-    size_t i;
-    unsigned char tbuf[pagesize];
-    for (i = 0; i < num_pages; ++i)
+    size_t page;
+    off_t cpart;
+    for (cpart = 0; cpart < parts; ++cpart)
     {
-      size_t diff = clic_read_block(tbuf, i);
-      if (i % delta == 0)
-	{
-	  fprintf(stderr, "read %d%%\n", (int)(i * 100 / num_pages));
+	size_t readin = clic_readpart(inbuf, cpart);
+	if (readin == 0) {
+	    return 1;
 	}
-      assert(diff == pagesize);
-      if (fwrite(tbuf, 1, pagesize, outfile) != pagesize) {
-	perror("write");
-        break;
-      }
+	clic_decompress_part(outbuf, inbuf, readin);
+
+	for (page = 0; page < num_pages; ++page)
+	{
+	    off_t mapped_block = clic_map_block(page);
+	    assert(mapped_block < (off_t)num_pages);
+
+	    off_t part, off;
+	    clic_find_block( mapped_block, &part, &off);
+	    assert(part < parts);
+
+	    if (part != cpart) continue;
+
+	    if (page % delta == 0)
+	    {
+		fprintf(stderr, "read %d%%\n", (int)(page * 100 / num_pages));
+	    }
+	    if (fseeko(outfile, page * pagesize, SEEK_SET)) {
+		perror("seek");
+		return 1;
+	    }
+
+	    if (fwrite(outbuf + pagesize * off, 1, pagesize, outfile) != pagesize) {
+		perror("write");
+		break;
+	    }
+	}
     }
 
     fclose(outfile);
