@@ -180,8 +180,6 @@ int clicfs_read_pack(const char *packfilename)
     sizes = malloc(sizeof(uint64_t)*parts);
     offs = malloc(sizeof(uint64_t)*parts);
 
-    fprintf(stderr, "parts %ld largeparts %ld bl %ld bs %ld\n", (long)parts, (long)largeparts, (long)blocksize_large, (long)blocksize_small);
-
     for (i = 0; i < parts; ++i)
     {
 	if (fread((char*)(sizes + i), sizeof(uint64_t), 1, packfile) != 1)
