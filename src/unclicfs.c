@@ -47,6 +47,8 @@ int main(int argc, char *argv[])
 
     size_t page;
     off_t cpart;
+    size_t written_pages = 0;
+
     for (cpart = 0; cpart < parts; ++cpart)
     {
 	size_t readin = clic_readpart(inbuf, cpart);
@@ -66,9 +68,9 @@ int main(int argc, char *argv[])
 
 	    if (part != cpart) continue;
 
-	    if (page % delta == 0)
+	    if (++written_pages % delta == 0)
 	    {
-		fprintf(stderr, "read %d%%\n", (int)(page * 100 / num_pages));
+		fprintf(stderr, "read %d%%\n", (int)(written_pages * 100 / num_pages));
 	    }
 	    if (fseeko(outfile, page * pagesize, SEEK_SET)) {
 		perror("seek");
