@@ -301,7 +301,6 @@ static void clic_log_access(size_t block)
     static size_t firstblock = 0;
     static ssize_t lastblock = -1;
 
-    fprintf(logger, "a %ld\n", (long)block);
     if (lastblock >= 0 && block != (size_t)(lastblock + 1))
     {
 	fprintf(logger, "access %ld+%ld\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8);
