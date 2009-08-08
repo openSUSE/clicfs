@@ -92,6 +92,7 @@ static size_t compress(int preset, unsigned char *in, size_t insize, unsigned ch
 }
 
 int blocksize = 32;
+int blocksizelarge = 3200;
 int infd = -1;
 uint32_t *ublocks = 0;
 uint32_t *found = 0;
@@ -214,7 +215,7 @@ void *reader(void *arg)
         int currentblocks = 0;
 
         inbuf_struct *in = new inbuf_struct();
-        in->inbuf = new unsigned char[100*blocksize*pagesize];
+        in->inbuf = new unsigned char[blocksizelarge*pagesize];
         in->readin = 0;
         in->totalin = 0;
         in->lastblock = false;
@@ -222,7 +223,7 @@ void *reader(void *arg)
         size_t currentblocksize = blocksize;
 
         if (rindex + 1 < pindex) {
-            currentblocksize = blocksize * 100;
+            currentblocksize = blocksizelarge;
             largeparts++;
         }
 
@@ -302,9 +303,9 @@ void *deflator(void *arg)
             inbuf_struct *in = (inbuf_struct*)queue_get(from_reader);
 
             outbuf_struct *out = new outbuf_struct();
-            out->outbuf = new unsigned char[100*blocksize*pagesize + 300];
+            out->outbuf = new unsigned char[blocksizelarge*pagesize + 300];
 //	    fprintf( stderr,  "compress start %ld %d %x %ld\n", pthread_self(), in->part, in->inbuf, in->readin );
-            out->outsize = compress(preset, in->inbuf, in->readin, out->outbuf, 100*blocksize*pagesize + 300);
+            out->outsize = compress(preset, in->inbuf, in->readin, out->outbuf, blocksizelarge*pagesize + 300);
             out->part = in->part;
             out->insize = in->readin;
             out->bpp = in->bpp;
@@ -438,7 +439,7 @@ int main(int argc, char **argv)
     bool usage = false;
     int opt;
 
-    while ((opt = getopt(argc, argv, "dp:b:l:c:n:")) != -1) {
+    while ((opt = getopt(argc, argv, "dp:b:l:c:n:h:")) != -1) {
         switch (opt) {
         case 'd':
             check_dups = false;
@@ -449,6 +450,11 @@ int main(int argc, char **argv)
         case 'b':
             blocksize = atoi(optarg);
             if (blocksize <= 0)
+                usage = true;
+            break;
+        case 'h':
+            blocksizelarge = atoi(optarg);
+            if (blocksizelarge <= 0)
                 usage = true;
             break;
         case 'p':
