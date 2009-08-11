@@ -234,7 +234,11 @@ static void clic_insert_after(struct buffer_combo *prev, struct buffer_combo *co
 
 static void clic_append_by_use(struct buffer_combo *com)
 {
-    assert(coms_sort_by_use_last);
+    if (!coms_sort_by_use_last) {
+       coms_sort_by_use_last = com;
+       coms_sort_by_use_first = com; 
+       return;
+    }
     coms_sort_by_use_last->next_by_use = com;
     com->prev_by_use = coms_sort_by_use_last;
     com->next_by_use = 0;
