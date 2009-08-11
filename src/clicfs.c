@@ -262,6 +262,13 @@ static void clic_insert_com(struct buffer_combo *com)
 	return;
     }
     struct buffer_combo *first = coms_sort_by_part;
+    if (first->part > com->part) {
+        com->next_by_part = coms_sort_by_part;
+        com->prev_by_part = 0;
+        coms_sort_by_part->prev_by_part = com;
+        coms_sort_by_part = com;
+        first = 0;
+    }
     while (first) {
 	if (first->part < com->part)
 	{
@@ -387,9 +394,9 @@ static const unsigned char *clic_uncompress(uint32_t part)
 #if defined(DEBUG)
     if (logger) fprintf(logger, "uncompress %d %ld-%ld %ld (read took %ld - started %ld)\n", part, (long)offs[part], (long)sizes[part], (long)readin, (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
 #endif
+    pthread_mutex_unlock(&seeker);
     if (!readin)
       return 0;
-    pthread_mutex_unlock(&seeker);
 
     clic_decompress_part(com->out_buffer, inbuffer, readin);
     free(inbuffer);
@@ -538,7 +545,10 @@ static size_t clic_read_block(char *buf, size_t block)
     
     off_t part, off;
     clic_find_block( mapped_block, &part, &off);
+
     assert(part < parts);
+
+    if (part >= largeparts)  { fprintf(logger, "big access %ld+8\n", block*8); }
 
     const unsigned char *partbuf = clic_uncompress(part);
     assert(partbuf);
@@ -738,17 +748,21 @@ int main(int argc, char *argv[])
 	sparse_memory = 0; // ignore the option if we have a cow
     }
 
+    uint32_t i;
+
     // fake for write
     if (sparse_memory) {
 	thefilesize = (thefilesize / pagesize * pagesize) + sparse_memory * 1024 * 1024;
 	size_t write_pages = thefilesize / pagesize;
 	blockmap = realloc(blockmap, sizeof(unsigned char*)*write_pages);
-	uint32_t i;
 	for (i = num_pages; i < write_pages; ++i)
 	    blockmap[i] = 0;
 	num_pages = write_pages;
     }
 
+    for (i = 0; i < largeparts; ++i) {
+	posix_fadvise( fileno(packfile), offs[i], sizes[i], POSIX_FADV_SEQUENTIAL);
+    }
     gettimeofday(&start, 0);
     int ret = fuse_main(args.argc, args.argv, &clic_oper, NULL);
     clic_write_cow();
