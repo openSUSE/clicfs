@@ -34,4 +34,5 @@ add_custom_target( update ${UPDATE_COMMAND} VERBATIM )
 
 ADD_SUBDIRECTORY(src)
 ADD_SUBDIRECTORY(doc)
+ADD_SUBDIRECTORY(misc)
 
