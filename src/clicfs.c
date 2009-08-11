@@ -277,51 +277,6 @@ static void clic_insert_com(struct buffer_combo *com)
     clic_append_by_use(com);
 }
 
-/**
- * the use list is sorted from oldest to newest buffer. This function switches two
- elememnts from P->F->S->N to P->S->F->N (first is F and second is S)
-*/
-static void clic_switch_use(struct buffer_combo *first, struct buffer_combo *second)
-{
-    assert(first->last_used > second->last_used);
-    struct buffer_combo *n = second->next_by_use;
-    struct buffer_combo *p = first->prev_by_use;
-
-    second->next_by_use = first;
-    first->next_by_use = n;
-    if (p)
-	p->next_by_use = second;
-    
-    second->prev_by_use = p;
-    if (n)
-	n->prev_by_use = first;
-    first->prev_by_use = second;
-    if (coms_sort_by_use_last == second)
-	coms_sort_by_use_last = first;
-    if (coms_sort_by_use_first == first)
-	coms_sort_by_use_first = second;
-}
-
-static int clic_resort_by_use(struct buffer_combo *c)
-{
-    // the assertion of the list is prev->lu < next->lu
-    if (c->prev_by_use && c->prev_by_use->last_used > c->last_used)
-    {
-	clic_switch_use(c->prev_by_use, c);
-	clic_resort_by_use(c);
-	return 1;
-    }
-
-    if (c->next_by_use && c->next_by_use->last_used < c->last_used)
-    {
-	clic_switch_use(c, c->next_by_use);
-	clic_resort_by_use(c);
-	return 1;
-    }
-
-    return 0;
-}
-
 static void clic_dump_use()
 {
     if (!logger)
@@ -351,11 +306,13 @@ static struct buffer_combo *clic_pick_part(uint32_t part)
     return com;
 }
 
-static void clic_free_com(struct buffer_combo *com)
+static void clic_remove_com_from_use(struct buffer_combo *com)
 {
     if (coms_sort_by_use_first == com)
 	coms_sort_by_use_first = com->next_by_use;
-    assert(com != coms_sort_by_use_last);
+    if (coms_sort_by_use_last == com)
+	coms_sort_by_use_last = com->prev_by_use;
+
     // P->C->N -> P->N
     struct buffer_combo *n = com->next_by_use;
     struct buffer_combo *p = com->prev_by_use;
@@ -363,12 +320,16 @@ static void clic_free_com(struct buffer_combo *com)
 	n->prev_by_use = p;
     if (p)
 	p->next_by_use = n;
+}
 
+static void clic_free_com(struct buffer_combo *com)
+{
+    clic_remove_com_from_use(com);
     if (coms_sort_by_part == com)
 	coms_sort_by_part = com->next_by_part;
     
-    n = com->next_by_part;
-    p = com->prev_by_part;
+    struct buffer_combo *n = com->next_by_part;
+    struct buffer_combo *p = com->prev_by_part;
     if (n)
 	n->prev_by_part = p;
     if (p)
@@ -387,9 +348,14 @@ static const unsigned char *clic_uncompress(uint32_t part)
     if (com)
     {
 	const unsigned char *buf = com->out_buffer;
-	com->last_used = now;
-	if (clic_resort_by_use(com) && 1)
-	    clic_dump_use();
+	if (com->last_used != now)
+	{
+	    com->last_used = now;
+	    clic_remove_com_from_use(com);
+	    clic_append_by_use(com);
+	    if (1)
+		clic_dump_use();
+	}
 	// if the oldest is 30s, drop it 
 	while (now - coms_sort_by_use_first->last_used > 30) {
 	    clic_free_com(coms_sort_by_use_first);
