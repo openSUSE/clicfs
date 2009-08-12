@@ -785,6 +785,17 @@ int main(int argc, char *argv[])
     
     if (logger) fclose(logger);
 
+    while (coms_sort_by_use_first)
+	clic_free_com(coms_sort_by_use_first);
+
+    for (i = 0; i < num_pages; ++i)
+    {
+	long ptr = (long)blockmap[i];
+	if (PTR_CLASS(ptr) == CLASS_MEMORY) { // block
+	    free(blockmap[i]);
+	}
+    }
+
     free(blockmap);
     free(sizes);
     free(offs);
