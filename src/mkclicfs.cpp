@@ -220,7 +220,7 @@ void *reader(void *arg)
         in->totalin = 0;
         in->lastblock = false;
 
-        size_t currentblocksize = blocksize;
+        ssize_t currentblocksize = blocksize;
 
         if (rindex + 1 < pindex) {
             currentblocksize = blocksizelarge;
@@ -414,7 +414,7 @@ int writer(size_t oparts, off_t index_off, FILE *out, uint64_t *sizes, uint64_t 
                 gettimeofday(&current, 0);
                 fprintf(stderr, "part blocks:%d%% parts:%ld total:%d%% time:%d\n",
                         lastpercentage+1, (long)comp->part,
-                        (int)(total_out * 100 / total_in), (current.tv_sec - start.tv_sec) * 1000 + ((current.tv_usec - start.tv_usec) / 1000 ));
+                        (int)(total_out * 100 / total_in), (int)((current.tv_sec - start.tv_sec) * 1000 + ((current.tv_usec - start.tv_usec) / 1000 )));
                 start.tv_sec = current.tv_sec;
                 start.tv_usec = current.tv_usec;
                 lastpercentage++;
