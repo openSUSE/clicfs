@@ -40,6 +40,8 @@
 #include <map>
 #include <string>
 
+static off_t memory_allocated = 0;
+
 static std::string calc_md5( unsigned char *d, size_t n )
 {
     unsigned char md5[20];
@@ -187,7 +189,7 @@ uint32_t parts = 0;
 uint32_t largeparts = 0;
 
 struct inbuf_struct {
-    size_t readin, totalin;
+    size_t readin, totalin, inbuf_size;
     unsigned char *inbuf;
     size_t part, bpp;
     bool lastblock;
@@ -215,10 +217,6 @@ void *reader(void *arg)
         int currentblocks = 0;
 
         inbuf_struct *in = new inbuf_struct();
-        in->inbuf = new unsigned char[blocksizelarge*pagesize];
-        in->readin = 0;
-        in->totalin = 0;
-        in->lastblock = false;
 
         ssize_t currentblocksize = blocksize;
 
@@ -226,6 +224,13 @@ void *reader(void *arg)
             currentblocksize = blocksizelarge;
             largeparts++;
         }
+
+        in->inbuf_size = currentblocksize*pagesize;
+        memory_allocated += in->inbuf_size;
+        in->inbuf = new unsigned char[in->inbuf_size];
+        in->readin = 0;
+        in->totalin = 0;
+        in->lastblock = false;
 
         //fprintf( stderr, "cbl %ld %ld %ld\n", currentblocksize, rindex, pindex );
 
@@ -270,7 +275,7 @@ void *reader(void *arg)
         in->part = parts++;
         in->bpp = currentblocksperpart;
         currentblocksperpart = 0;
-        //fprintf( stderr, "put part %d %d\n", in->part, queue_length(from_reader));
+        //fprintf( stderr, "put part %d %d %ld\n", in->part, queue_length(from_reader), ( long )( memory_allocated / 1024 / 1024) );
         queue_put( from_reader, in );
 
     }
@@ -288,6 +293,7 @@ struct outbuf_struct
     bool lastblock;
 
     ~outbuf_struct() {
+        memory_allocated -= ( totalin + 300 );
         delete [] outbuf;
     }
 };
@@ -303,8 +309,9 @@ void *deflator(void *arg)
             inbuf_struct *in = (inbuf_struct*)queue_get(from_reader);
 
             outbuf_struct *out = new outbuf_struct();
-            out->outbuf = new unsigned char[blocksizelarge*pagesize + 300];
-//	    fprintf( stderr,  "compress start %ld %d %x %ld\n", pthread_self(), in->part, in->inbuf, in->readin );
+            out->outbuf = new unsigned char[in->totalin + 300];
+            memory_allocated += in->totalin + 300;
+            //fprintf( stderr,  "compress start %ld %d %ld %ld\n", pthread_self(), in->part, in->totalin, in->readin );
             out->outsize = compress(preset, in->inbuf, in->readin, out->outbuf, blocksizelarge*pagesize + 300);
             out->part = in->part;
             out->insize = in->readin;
@@ -313,6 +320,7 @@ void *deflator(void *arg)
             out->totalin = in->totalin;
 
             //fprintf( stderr,  "compress %ld %d %x %ld -> %ld\n", pthread_self(), in->part, in->inbuf, in->readin, out->outsize );
+            memory_allocated -= in->inbuf_size;
             delete [] in->inbuf;
             delete in;
 
@@ -357,7 +365,7 @@ void initialise_threads()
         if((thread = (pthread_t*)malloc((2 + processors * 2) * sizeof(pthread_t))) == NULL)
             exit( 1 );
 
-        from_reader = queue_init(20);
+        from_reader = queue_init(processors * 2 + 2);
         to_writer = queue_init(20);
         pthread_create(&thread[0], NULL, reader, NULL);
 
