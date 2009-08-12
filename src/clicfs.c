@@ -424,7 +424,7 @@ static void clic_log_access(size_t block)
     }
 }
 
-static size_t clic_read_block(char *buf, size_t block);
+static ssize_t clic_read_block(char *buf, size_t block);
 
 static int clic_detach(size_t block)
 {
@@ -513,8 +513,9 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     }
 }
 
-static size_t clic_read_block(char *buf, size_t block)
+static ssize_t clic_read_block(char *buf, size_t block)
 {
+    if (logger) fprintf(logger, "clic_read_block %ld %ld\n", (long)block, (long)num_pages);
     if (block >= num_pages)
 	return -EFAULT;
 
@@ -548,7 +549,7 @@ static size_t clic_read_block(char *buf, size_t block)
 
     assert(part < parts);
 
-    if (part >= largeparts)  { fprintf(logger, "big access %ld+8\n", block*8); }
+    if (part >= largeparts && logger)  { fprintf(logger, "big access %ld+8\n", block*8); }
 
     const unsigned char *partbuf = clic_uncompress(part);
     assert(partbuf);
@@ -560,7 +561,7 @@ static size_t clic_read_block(char *buf, size_t block)
 static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
-    // fprintf(stdout, "read %ld %ld %ld\n", offset, size, thefilesize);
+    if (logger) fprintf(logger, "read %ld %ld %ld\n", offset, size, thefilesize);
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
@@ -574,7 +575,12 @@ static int clic_read(const char *path, char *buf, size_t size, off_t offset,
     {
 	if (offset >= (off_t)thefilesize)
 		break;
-	size_t diff = clic_read_block(buf, offset / pagesize);
+	off_t block = offset / pagesize;
+	ssize_t diff = clic_read_block(buf, block);
+	if (diff < 0) {
+	    return diff;
+	}
+	if (logger) fprintf(logger, "read block %ld: %ld bytes\n", (long)block, (long)diff);
 	if (!diff)
 	  break;
 	size -= diff;
@@ -608,8 +614,17 @@ static int clic_fsync(const char *path, int datasync, struct fuse_file_info *fi)
     return 0;
 }
 
+static void* clic_init(struct fuse_conn_info *conn)
+{
+    // avoid random reads or our profiling will be destroyed
+    conn->max_readahead = 0;
+
+    return 0;
+}
+
 static struct fuse_operations clic_oper = {
-    .getattr   = clic_getattr,
+    .init    = clic_init,
+    .getattr = clic_getattr,
     .readdir = clic_readdir,
     .open   = clic_open,
     .read   = clic_read,
