@@ -515,7 +515,6 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
 
 static ssize_t clic_read_block(char *buf, size_t block)
 {
-    if (logger) fprintf(logger, "clic_read_block %ld %ld\n", (long)block, (long)num_pages);
     if (block >= num_pages)
 	return -EFAULT;
 
@@ -561,7 +560,7 @@ static ssize_t clic_read_block(char *buf, size_t block)
 static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
-    if (logger) fprintf(logger, "read %ld %ld %ld\n", offset, size, thefilesize);
+    //if (logger) fprintf(logger, "read %ld %ld %ld\n", offset, size, thefilesize);
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
@@ -580,7 +579,7 @@ static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 	if (diff < 0) {
 	    return diff;
 	}
-	if (logger) fprintf(logger, "read block %ld: %ld bytes\n", (long)block, (long)diff);
+	//if (logger) fprintf(logger, "read block %ld: %ld bytes\n", (long)block, (long)diff);
 	if (!diff)
 	  break;
 	size -= diff;
