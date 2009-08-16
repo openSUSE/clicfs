@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <sys/time.h>
+#include <sys/mman.h>
 
 #define DEBUG 1
 
@@ -37,6 +38,7 @@ FILE *logger = 0;
 static size_t detached_allocated = 0;
 static size_t sparse_memory = 0;
 static char *cowfilename = 0;
+static off_t memory_used = 0;
 
 static struct timeval start;
 
@@ -55,7 +57,7 @@ static int clic_write_cow()
     if (!cowfilename || cowfile_ro == 1 || !detached_allocated)
 	return 0;
 
-    if (logger) fprintf(logger, "cow detached %dMB\n", (int)(detached_allocated / 1024));
+    //if (logger) fprintf(logger, "cow detached %dMB\n", (int)(detached_allocated / 1024));
 
     uint32_t i;
     for (i = 0; i < num_pages; ++i)
@@ -204,6 +206,8 @@ static int clic_open(const char *path, struct fuse_file_info *fi)
 struct buffer_combo {
     // the buffer of the part
     unsigned char *out_buffer;
+    off_t out_buffer_size;
+    int mmapped;
     uint32_t part;
     time_t last_used;
     struct buffer_combo *next_by_part;
@@ -294,7 +298,7 @@ static void clic_dump_use()
 	return;
 
     struct buffer_combo *c =  coms_sort_by_use_first;
-    fprintf(logger, "dump ");
+    fprintf(logger, "dump %ldMB ", memory_used / 1024 / 1024);
     while (c) {
 	fprintf(logger, "%ld ", (long)c->part);
 	c = c->next_by_use;
@@ -346,39 +350,62 @@ static void clic_free_com(struct buffer_combo *com)
     if (p)
 	p->next_by_part = n;
 
-    free(com->out_buffer);
+    if (com->mmapped == 1) {
+	int ret = munmap(com->out_buffer, com->out_buffer_size);
+	if (ret == -1) {
+	    perror("munmap");
+	    exit(1);
+	}
+    } else
+	free(com->out_buffer);
+    memory_used -= com->out_buffer_size;
     free(com);
+    memory_used -= sizeof(struct buffer_combo);
 }
 
 static const unsigned char *clic_uncompress(uint32_t part)
 {
     //if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
     time_t now = time(0);
+
+    if (coms_sort_by_use_first) // clean up
+    {
+	if (0) clic_dump_use();
+	// if the oldest is 1m, drop it 
+	while (coms_sort_by_use_first && (now - coms_sort_by_use_first->last_used > 60 || (memory_used > 1024 * 1024 * 100 && coms_sort_by_use_first->part != part))) {
+	    clic_free_com(coms_sort_by_use_first);
+	}
+    	//clic_dump_use();
+    }
+
     struct buffer_combo *com = clic_pick_part(part);
         
     if (com)
     {
 	const unsigned char *buf = com->out_buffer;
-	if (com->last_used != now)
-	{
-	    com->last_used = now;
-	    clic_remove_com_from_use(com);
-	    clic_append_by_use(com);
-	    if (1)
-		clic_dump_use();
-	}
-	// if the oldest is 30s, drop it 
-	while (now - coms_sort_by_use_first->last_used > 30) {
-	    clic_free_com(coms_sort_by_use_first);
-	}
+	com->last_used = now;
+	clic_remove_com_from_use(com);
+	clic_append_by_use(com);
 	return buf;
     }
 
     com = malloc(sizeof(struct buffer_combo));
-    if (part < largeparts)
-	com->out_buffer = malloc(blocksize_large*pagesize);
-    else
+    memory_used += sizeof(struct buffer_combo);
+    if (part < largeparts) {
+	com->out_buffer_size = blocksize_large*pagesize;
+	// TODO: round up to the next PAGE_SIZE (no worry for now)
+	com->out_buffer = mmap(0, com->out_buffer_size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+	if (com->out_buffer == MAP_FAILED) {
+	    perror("mmap");
+	    exit(1);
+	}
+	com->mmapped = 1;
+    } else {
+	com->out_buffer_size = blocksize_small*pagesize;
 	com->out_buffer = malloc(blocksize_small*pagesize);
+	com->mmapped = 0;
+    }
+    memory_used += com->out_buffer_size;
     com->last_used = now;
     com->part = part;
 
@@ -444,7 +471,7 @@ static int clic_detach(size_t block)
 
 	clic_read_block(newptr, block);
 	if (PTR_CLASS(ptr) == CLASS_COW) { // we need to mark the place in the cow obsolete
-	    if (logger) fprintf(logger, "detach block %ld (was %ld)\n", (long)block, (long)ptr >> 2);
+	    //if (logger) fprintf(logger, "detach block %ld (was %ld)\n", (long)block, (long)ptr >> 2);
 	    cows[cows_index++] = (long)ptr >> 2;
 	    cow_pages--;
 	}
@@ -518,8 +545,6 @@ static ssize_t clic_read_block(char *buf, size_t block)
     if (block >= num_pages)
 	return -EFAULT;
 
-    clic_log_access(block);
-
     if (!blockmap[block]) { // sparse block 
         memset(buf, 0, pagesize);
         return pagesize;
@@ -541,6 +566,8 @@ static ssize_t clic_read_block(char *buf, size_t block)
     assert(PTR_CLASS(ptr) == CLASS_RO); // in read only part
     assert(block < num_pages);
 
+    clic_log_access(block);
+
     off_t mapped_block = clic_map_block(block);
     
     off_t part, off;
@@ -548,7 +575,7 @@ static ssize_t clic_read_block(char *buf, size_t block)
 
     assert(part < parts);
 
-    if (part >= largeparts && logger)  { fprintf(logger, "big access %ld+8\n", block*8); }
+    //if (part >= largeparts && logger)  { fprintf(logger, "big access %ld+8\n", block*8); }
 
     const unsigned char *partbuf = clic_uncompress(part);
     assert(partbuf);
