@@ -216,7 +216,7 @@ struct buffer_combo {
 
 // first
 struct buffer_combo **coms_by_part = 0;
-#define MAX_COMS_SIZE 30000
+#define MAX_COMS_SIZE 3000
 int32_t coms_sort_by_part_size = 0;
 struct buffer_combo *coms_sort_by_use_first = 0;
 struct buffer_combo *coms_sort_by_use_last = 0;
@@ -358,7 +358,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
     {
 	if (0) clic_dump_use();
 	// if the oldest is 1m, drop it 
-	while (coms_sort_by_use_first && (now - coms_sort_by_use_first->last_used > 60 || (memory_used > 1024 * 1024 * 100 && coms_sort_by_use_first->part != part))) {
+	while (coms_sort_by_use_first && (now - coms_sort_by_use_first->last_used > 30 || (memory_used > 1024 * 1024 * 10 && coms_sort_by_use_first->part != part))) {
 	    clic_free_com(coms_sort_by_use_first);
 	}
     	//clic_dump_use();

@@ -577,7 +577,7 @@ int main(int argc, char **argv)
     if (!writeindex(out, blocksize )) return 1;
     index_off += sizeof(uint32_t);
 
-    if (!writeindex(out, 100 * blocksize )) return 1;
+    if (!writeindex(out, 4 * blocksize )) return 1;
     index_off += sizeof(uint32_t);
 
     if (!writeindex(out, pagesize )) return 1;
