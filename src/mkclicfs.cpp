@@ -94,7 +94,7 @@ static size_t compress(int preset, unsigned char *in, size_t insize, unsigned ch
 }
 
 int blocksize = 32;
-int blocksizelarge = 3200;
+int blocksizelarge = 128;
 int infd = -1;
 uint32_t *ublocks = 0;
 uint32_t *found = 0;
@@ -577,7 +577,7 @@ int main(int argc, char **argv)
     if (!writeindex(out, blocksize )) return 1;
     index_off += sizeof(uint32_t);
 
-    if (!writeindex(out, 4 * blocksize )) return 1;
+    if (!writeindex(out, blocksizelarge )) return 1;
     index_off += sizeof(uint32_t);
 
     if (!writeindex(out, pagesize )) return 1;
