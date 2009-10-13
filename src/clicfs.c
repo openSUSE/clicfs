@@ -39,6 +39,8 @@ static size_t detached_allocated = 0;
 static size_t sparse_memory = 0;
 static char *cowfilename = 0;
 static off_t memory_used = 0;
+static time_t last_sync = 0;
+static time_t last_write = 0;
 
 static struct timeval start;
 
@@ -516,6 +518,8 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
 
     assert(ioff == 0 || ioff + size <= pagesize);
 
+    last_write = time(0);
+    
     if (size <= pagesize) {
         return clic_write_block(buf, block, ioff, size);
     } else {
@@ -630,17 +634,51 @@ static int clic_fsync(const char *path, int datasync, struct fuse_file_info *fi)
     // TODO write out cow
     if (logger) fflush(logger);
     clic_write_cow();
-    fsync(cowfilefd);
+    last_sync = time(0);
+    if (cowfilefd >= 0) fsync(cowfilefd);
     return 0;
 }
+
+static void *clic_sync_thread(void *arg)
+{
+    (void)arg;
+
+    while (1) {
+	sleep(1);
+	    
+	if (last_sync < last_write) {
+	    if (cowfilefd < 0)
+		pthread_exit(0);
+	    if (logger) fprintf(logger, "Thread %d %ld %ld\n", cowfilefd, last_sync, last_write);
+	    clic_write_cow();
+	    last_sync = time(0);
+	    if (cowfilefd >= 0) fsync(cowfilefd);
+	}
+    }
+
+    return 0;
+}
+
+static pthread_t clic_sync_tid;
 
 static void* clic_init(struct fuse_conn_info *conn)
 {
     // avoid random reads or our profiling will be destroyed
     conn->max_readahead = 0;
 
+    pthread_create(&clic_sync_tid, NULL, clic_sync_thread, 0);
+       
     return 0;
 }
+
+static void clic_destroy(void *arg)
+{
+    (void)arg;
+    pthread_cancel(clic_sync_tid);
+    void *res;
+    pthread_join(clic_sync_tid, &res);
+}
+
 
 static struct fuse_operations clic_oper = {
     .init    = clic_init,
@@ -650,7 +688,8 @@ static struct fuse_operations clic_oper = {
     .read   = clic_read,
     .write  = clic_write,
     .flush  = clic_flush,
-    .fsync = clic_fsync
+    .fsync = clic_fsync,
+    .destroy = clic_destroy
 };
   
 char *packfilename = 0;
@@ -803,7 +842,7 @@ int main(int argc, char *argv[])
     /* MAIN LOOP */
     int ret = fuse_main(args.argc, args.argv, &clic_oper, NULL);
     clic_write_cow();
-    close(cowfilefd);
+    if (cowfilefd >= 0) close(cowfilefd);
     
     if (logger) fclose(logger);
 
