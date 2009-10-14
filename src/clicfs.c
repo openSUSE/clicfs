@@ -51,18 +51,27 @@ static uint32_t clic_find_next_cow()
     return cow_pages + cow_index_pages;
 }
 
-static int clic_detach(size_t block);
+static int clic_detach(size_t block, int islock);
 static int clic_write_cow();
 
 pthread_mutex_t cowfile_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t cowfile_mutex_writer = PTHREAD_MUTEX_INITIALIZER;
 
-static int clic_write_cow()
+static int clic_write_cow(int islocked)
 {
     if (!cowfilename || cowfile_ro == 1 || !detached_allocated)
 	return 0;
 
-    //if (logger) fprintf(logger, "cow detached %dMB\n", (int)(detached_allocated / 1024));
+    int ret = 0;
 
+    //if (logger) fprintf(logger, "cow detached %dMB\n", (int)(detached_allocated / 1024));
+    if (logger) fprintf(logger, "clic_write_cow %ld\n", pthread_self());
+    
+    if (!islocked) {
+	fprintf(logger, "lock3 w %ld\n", pthread_self());
+	pthread_mutex_lock(&cowfile_mutex_writer);
+    }
+    fprintf(logger, "lock4 %ld\n", pthread_self());
     pthread_mutex_lock(&cowfile_mutex);
 
     uint32_t i;
@@ -105,6 +114,7 @@ static int clic_write_cow()
     // should all be out
     assert(cows_index == 0);
 
+    fprintf(logger, "unlock4 %ld\n", pthread_self());
     pthread_mutex_unlock(&cowfile_mutex);
 
     for (moving = cow_index_pages; moving < new_cow_index_pages; ++moving)
@@ -119,7 +129,7 @@ static int clic_write_cow()
 	    if (PTR_CLASS(ptr) == CLASS_COW) { // block
 		if ((ptr >> 2) == moving) {
 		    if (logger) fprintf(logger, "moving %ld %ld\n", (long)moving, (long)i);
-		    clic_detach(i);
+		    clic_detach(i, 1);
 		    moved++;
 		    break;
 		}
@@ -134,9 +144,11 @@ static int clic_write_cow()
     /* if we moved, we need to redetach */
     if (moved) {
 	cows_index = 0; 
-	return clic_write_cow();
+	ret = clic_write_cow(1);
+	goto exit;
     }
 
+    fprintf(logger, "lock5 %ld\n", pthread_self());
     pthread_mutex_lock(&cowfile_mutex);
 
     for (i = 0; i < num_pages; ++i)
@@ -149,12 +161,20 @@ static int clic_write_cow()
 	    stringlen++;
 	}
     }
+
     assert(stringlen == cow_pages);
     write(cowfilefd, (char*)&index_len, sizeof(uint32_t));
 
+    fprintf(logger, "unlock5 %ld\n", pthread_self());
     pthread_mutex_unlock(&cowfile_mutex);
+    
+exit:
+    if (!islocked) {
+	fprintf(logger, "unlock3 w %ld\n", pthread_self());
+	pthread_mutex_unlock(&cowfile_mutex_writer);
+    }
 
-    return 0;
+    return ret;
 }
 
 /** 
@@ -459,16 +479,23 @@ static void clic_log_access(size_t block)
 
 static ssize_t clic_read_block(char *buf, size_t block);
 
-static int clic_detach(size_t block)
+static int clic_detach(size_t block, int islocked)
 {
     assert(block < num_pages);
+
+    if (!islocked) {
+	fprintf(logger, "lock7 w %ld\n", pthread_self());
+	pthread_mutex_lock(&cowfile_mutex_writer);
+    }
+
+    int ret = 0;
 
     unsigned char *ptr = blockmap[block];
     if ((PTR_CLASS(ptr) == CLASS_RO ) || (PTR_CLASS(ptr) == CLASS_COW))
     {
 	if (PTR_CLASS(ptr) == CLASS_COW) {
 	    if (cows_index == CLICFS_COW_COUNT - 1)
-		clic_write_cow();
+		clic_write_cow(0);
 	}
 
 	char *newptr = malloc(pagesize);
@@ -483,7 +510,8 @@ static int clic_detach(size_t block)
 	}
 	blockmap[block] = (unsigned char*)newptr;
 
-	return 1;
+	ret = 1;
+	goto exit;
     }
 
     if (!blockmap[block])
@@ -493,15 +521,21 @@ static int clic_detach(size_t block)
 	detached_allocated += (pagesize / 1024);
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 	memset(blockmap[block],0,pagesize);
-	return 1;
+	ret = 1;
     }
 
-    return 0;
+exit:
+    if (!islocked) {
+	fprintf(logger, "unlock7 w %ld\n", pthread_self());
+	pthread_mutex_unlock(&cowfile_mutex_writer);
+    }
+
+    return ret;
 }
 
 static size_t clic_write_block(const char *buf, off_t block, off_t ioff, size_t size)
 {
-    clic_detach(block);
+    clic_detach(block, 1);
     memcpy(blockmap[block]+ioff, buf, size);
     return size;
 }
@@ -523,15 +557,19 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     if (!size)
 	return 0;
 
+    pthread_mutex_lock(&cowfile_mutex_writer);
+
     off_t block = offset / pagesize;
     off_t ioff = offset - block * pagesize;
 
     assert(ioff == 0 || ioff + size <= pagesize);
 
     last_write = time(0);
-    
+
+    int ret = 0;
+
     if (size <= pagesize) {
-        return clic_write_block(buf, block, ioff, size);
+        ret = clic_write_block(buf, block, ioff, size);
     } else {
 	size_t wrote = 0;
 	do
@@ -544,8 +582,10 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
 	    wrote += diff;
 	} while (size > 0);
 
-	return wrote;
+	ret = wrote;
     }
+    pthread_mutex_unlock(&cowfile_mutex_writer);
+    return ret;
 }
 
 static ssize_t clic_read_block(char *buf, size_t block)
@@ -567,9 +607,11 @@ static ssize_t clic_read_block(char *buf, size_t block)
 
     if (PTR_CLASS(ptr) == CLASS_COW) {
 	off_t target = ptr >> 2;
+	fprintf(logger, "lock1 %ld\n", pthread_self());
 	pthread_mutex_lock(&cowfile_mutex);
 	lseek(cowfilefd, target * pagesize, SEEK_SET);
 	ssize_t haveread = read(cowfilefd, buf, pagesize);
+	fprintf(logger, "unlock1 %ld\n", pthread_self());
 	pthread_mutex_unlock(&cowfile_mutex);
 	return haveread;
     }
@@ -635,7 +677,7 @@ static int clic_flush(const char *path, struct fuse_file_info *fi)
     (void)fi;
     // TODO write out cow
     if (logger)	fflush(logger);
-    clic_write_cow();
+    clic_write_cow(0);
     return 0;
 }
 
@@ -646,10 +688,12 @@ static int clic_fsync(const char *path, int datasync, struct fuse_file_info *fi)
     (void)datasync;
     // TODO write out cow
     if (logger) fflush(logger);
-    clic_write_cow();
+    clic_write_cow(0);
     last_sync = time(0);
+    fprintf(logger, "lock2 %ld\n", pthread_self());
     pthread_mutex_lock(&cowfile_mutex);
     if (cowfilefd >= 0) fsync(cowfilefd);
+    fprintf(logger, "unlock2 %ld\n", pthread_self());
     pthread_mutex_unlock(&cowfile_mutex);
     return 0;
 }
@@ -665,10 +709,8 @@ static void *clic_sync_thread(void *arg)
 	    if (cowfilefd < 0)
 		pthread_exit(0);
 	    if (logger) fprintf(logger, "Sync thread %d %ld %ld\n", cowfilefd, last_sync, last_write);
-	    last_sync = time(0);
-	    pthread_mutex_lock(&cowfile_mutex);
-	    if (cowfilefd >= 0) fsync(cowfilefd);
-	    pthread_mutex_unlock(&cowfile_mutex);
+	    // assume the paramters are not used
+	    clic_fsync(0, 0, 0);
 	}
     }
 
@@ -690,6 +732,7 @@ static void* clic_init(struct fuse_conn_info *conn)
 static void clic_destroy(void *arg)
 {
     (void)arg;
+    if (logger) fprintf(logger, "destroy\n");
     pthread_cancel(clic_sync_tid);
     void *res;
     pthread_join(clic_sync_tid, &res);
@@ -857,7 +900,7 @@ int main(int argc, char *argv[])
     gettimeofday(&start, 0);
     /* MAIN LOOP */
     int ret = fuse_main(args.argc, args.argv, &clic_oper, NULL);
-    clic_write_cow();
+    clic_write_cow(0);
     if (cowfilefd >= 0) close(cowfilefd);
     
     if (logger) fclose(logger);
