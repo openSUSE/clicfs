@@ -54,12 +54,16 @@ static uint32_t clic_find_next_cow()
 static int clic_detach(size_t block);
 static int clic_write_cow();
 
+pthread_mutex_t cowfile_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static int clic_write_cow()
 {
     if (!cowfilename || cowfile_ro == 1 || !detached_allocated)
 	return 0;
 
     //if (logger) fprintf(logger, "cow detached %dMB\n", (int)(detached_allocated / 1024));
+
+    pthread_mutex_lock(&cowfile_mutex);
 
     uint32_t i;
     for (i = 0; i < num_pages; ++i)
@@ -101,6 +105,8 @@ static int clic_write_cow()
     // should all be out
     assert(cows_index == 0);
 
+    pthread_mutex_unlock(&cowfile_mutex);
+
     for (moving = cow_index_pages; moving < new_cow_index_pages; ++moving)
     {
 	// we only have a map from memory to cow, so we need to 
@@ -131,6 +137,8 @@ static int clic_write_cow()
 	return clic_write_cow();
     }
 
+    pthread_mutex_lock(&cowfile_mutex);
+
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
@@ -143,7 +151,9 @@ static int clic_write_cow()
     }
     assert(stringlen == cow_pages);
     write(cowfilefd, (char*)&index_len, sizeof(uint32_t));
-    
+
+    pthread_mutex_unlock(&cowfile_mutex);
+
     return 0;
 }
 
@@ -557,8 +567,11 @@ static ssize_t clic_read_block(char *buf, size_t block)
 
     if (PTR_CLASS(ptr) == CLASS_COW) {
 	off_t target = ptr >> 2;
+	pthread_mutex_lock(&cowfile_mutex);
 	lseek(cowfilefd, target * pagesize, SEEK_SET);
-	return read(cowfilefd, buf, pagesize);
+	ssize_t haveread = read(cowfilefd, buf, pagesize);
+	pthread_mutex_unlock(&cowfile_mutex);
+	return haveread;
     }
 
     assert(PTR_CLASS(ptr) == CLASS_RO); // in read only part
@@ -635,7 +648,9 @@ static int clic_fsync(const char *path, int datasync, struct fuse_file_info *fi)
     if (logger) fflush(logger);
     clic_write_cow();
     last_sync = time(0);
+    pthread_mutex_lock(&cowfile_mutex);
     if (cowfilefd >= 0) fsync(cowfilefd);
+    pthread_mutex_unlock(&cowfile_mutex);
     return 0;
 }
 
@@ -646,13 +661,14 @@ static void *clic_sync_thread(void *arg)
     while (1) {
 	sleep(1);
 	    
-	if (last_sync < last_write) {
+	if (last_sync < last_write ) {
 	    if (cowfilefd < 0)
 		pthread_exit(0);
-	    if (logger) fprintf(logger, "Thread %d %ld %ld\n", cowfilefd, last_sync, last_write);
-	    clic_write_cow();
+	    if (logger) fprintf(logger, "Sync thread %d %ld %ld\n", cowfilefd, last_sync, last_write);
 	    last_sync = time(0);
+	    pthread_mutex_lock(&cowfile_mutex);
 	    if (cowfilefd >= 0) fsync(cowfilefd);
+	    pthread_mutex_unlock(&cowfile_mutex);
 	}
     }
 
