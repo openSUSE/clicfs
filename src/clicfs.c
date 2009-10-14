@@ -67,11 +67,8 @@ static int clic_write_cow(int islocked)
     //if (logger) fprintf(logger, "cow detached %dMB\n", (int)(detached_allocated / 1024));
     if (logger) fprintf(logger, "clic_write_cow %ld\n", pthread_self());
     
-    if (!islocked) {
-	fprintf(logger, "lock3 w %ld\n", pthread_self());
+    if (!islocked)
 	pthread_mutex_lock(&cowfile_mutex_writer);
-    }
-    fprintf(logger, "lock4 %ld\n", pthread_self());
     pthread_mutex_lock(&cowfile_mutex);
 
     uint32_t i;
@@ -114,7 +111,6 @@ static int clic_write_cow(int islocked)
     // should all be out
     assert(cows_index == 0);
 
-    fprintf(logger, "unlock4 %ld\n", pthread_self());
     pthread_mutex_unlock(&cowfile_mutex);
 
     for (moving = cow_index_pages; moving < new_cow_index_pages; ++moving)
@@ -148,7 +144,6 @@ static int clic_write_cow(int islocked)
 	goto exit;
     }
 
-    fprintf(logger, "lock5 %ld\n", pthread_self());
     pthread_mutex_lock(&cowfile_mutex);
 
     for (i = 0; i < num_pages; ++i)
@@ -165,14 +160,11 @@ static int clic_write_cow(int islocked)
     assert(stringlen == cow_pages);
     write(cowfilefd, (char*)&index_len, sizeof(uint32_t));
 
-    fprintf(logger, "unlock5 %ld\n", pthread_self());
     pthread_mutex_unlock(&cowfile_mutex);
     
 exit:
-    if (!islocked) {
-	fprintf(logger, "unlock3 w %ld\n", pthread_self());
+    if (!islocked)
 	pthread_mutex_unlock(&cowfile_mutex_writer);
-    }
 
     return ret;
 }
@@ -483,10 +475,8 @@ static int clic_detach(size_t block, int islocked)
 {
     assert(block < num_pages);
 
-    if (!islocked) {
-	fprintf(logger, "lock7 w %ld\n", pthread_self());
+    if (!islocked)
 	pthread_mutex_lock(&cowfile_mutex_writer);
-    }
 
     int ret = 0;
 
@@ -525,10 +515,8 @@ static int clic_detach(size_t block, int islocked)
     }
 
 exit:
-    if (!islocked) {
-	fprintf(logger, "unlock7 w %ld\n", pthread_self());
+    if (!islocked)
 	pthread_mutex_unlock(&cowfile_mutex_writer);
-    }
 
     return ret;
 }
@@ -607,11 +595,9 @@ static ssize_t clic_read_block(char *buf, size_t block)
 
     if (PTR_CLASS(ptr) == CLASS_COW) {
 	off_t target = ptr >> 2;
-	fprintf(logger, "lock1 %ld\n", pthread_self());
 	pthread_mutex_lock(&cowfile_mutex);
 	lseek(cowfilefd, target * pagesize, SEEK_SET);
 	ssize_t haveread = read(cowfilefd, buf, pagesize);
-	fprintf(logger, "unlock1 %ld\n", pthread_self());
 	pthread_mutex_unlock(&cowfile_mutex);
 	return haveread;
     }
@@ -650,6 +636,8 @@ static int clic_read(const char *path, char *buf, size_t size, off_t offset,
     assert(size % pagesize == 0);
     assert(offset % pagesize == 0);
 
+    pthread_mutex_lock(&cowfile_mutex_writer);
+
     do
     {
 	if (offset >= (off_t)thefilesize)
@@ -667,6 +655,8 @@ static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 	offset += diff;
 	readtotal += diff;
     } while (size > 0);
+
+    pthread_mutex_unlock(&cowfile_mutex_writer);
 
     return readtotal;
 }
@@ -690,10 +680,8 @@ static int clic_fsync(const char *path, int datasync, struct fuse_file_info *fi)
     if (logger) fflush(logger);
     clic_write_cow(0);
     last_sync = time(0);
-    fprintf(logger, "lock2 %ld\n", pthread_self());
     pthread_mutex_lock(&cowfile_mutex);
     if (cowfilefd >= 0) fsync(cowfilefd);
-    fprintf(logger, "unlock2 %ld\n", pthread_self());
     pthread_mutex_unlock(&cowfile_mutex);
     return 0;
 }
