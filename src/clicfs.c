@@ -31,7 +31,7 @@
 #include <sys/time.h>
 #include <sys/mman.h>
 
-#define DEBUG 1
+#define DEBUG 0
 
 FILE *logger = 0;
 
@@ -434,16 +434,19 @@ static const unsigned char *clic_uncompress(uint32_t part)
     struct timeval begin, end;
     gettimeofday(&begin, 0);
     size_t readin = clic_readpart(inbuffer, part);
+    pthread_mutex_unlock(&seeker);
     gettimeofday(&end, 0);
+    if (!readin) {
+      free(inbuffer);
+      return 0;
+    }
 
 #if defined(DEBUG)
     if (logger) fprintf(logger, "uncompress %d %ld-%ld %ld (read took %ld - started %ld)\n", part, (long)offs[part], (long)sizes[part], (long)readin, (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
 #endif
-    pthread_mutex_unlock(&seeker);
-    if (!readin)
-      return 0;
-
-    clic_decompress_part(com->out_buffer, inbuffer, readin);
+    if (!clic_decompress_part(com->out_buffer, inbuffer, readin)) {
+      if (logger) fprintf(logger, "uncompess of part %d failed - ignoring", part);
+    }
     free(inbuffer);
 
     return com->out_buffer;
@@ -617,8 +620,13 @@ static ssize_t clic_read_block(char *buf, size_t block)
     //if (part >= largeparts && logger)  { fprintf(logger, "big access %ld+8\n", block*8); }
 
     const unsigned char *partbuf = clic_uncompress(part);
-    assert(partbuf);
-    memcpy(buf, partbuf + pagesize * off, pagesize);
+    if (!partbuf) 
+    {
+      // problems in the, invent 0 block
+      memset(buf,0,pagesize);
+    } else {
+      memcpy(buf, partbuf + pagesize * off, pagesize);
+    }
 
     return pagesize;
 }
@@ -721,7 +729,7 @@ static void clic_destroy(void *arg)
 {
     (void)arg;
     if (logger) fprintf(logger, "destroy\n");
-    pthread_cancel(clic_sync_tid);
+    //pthread_cancel(clic_sync_tid);
     void *res;
     pthread_join(clic_sync_tid, &res);
 }

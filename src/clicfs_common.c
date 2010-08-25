@@ -234,11 +234,13 @@ size_t clic_readpart(unsigned char *buffer, int part)
     size_t readin = fread(buffer, 1, sizes[part], packfile);
     if (readin != sizes[part]) {
 	fprintf(stderr, "short read: %d %ld %ld %ld\n", part, (long)offs[part], (long)sizes[part], (long)readin);
+	// returning half read blocks won't help lzma
+	return 0;
     }
     return readin;
 }
 
-void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t readin)
+int clic_decompress_part(unsigned char *out, const unsigned char *in, size_t readin)
 {
     strm.next_in = in;
     strm.avail_in = readin;
@@ -251,7 +253,9 @@ void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t re
     lzma_ret ret;
     while (1) {
 	ret = lzma_code(&strm, LZMA_RUN);
-	//fprintf(stderr, "ret %d %ld %ld\n", ret, strm.avail_in, strm.avail_out );
+#if defined(DEBUG)
+	fprintf(stderr, "ret %d %ld %ld\n", ret, strm.avail_in, strm.avail_out );
+#endif
 	if (ret != LZMA_OK)
 	    break;
 	if (!strm.avail_in)
@@ -260,10 +264,14 @@ void clic_decompress_part(unsigned char *out, const unsigned char *in, size_t re
 
     if (ret == LZMA_DATA_ERROR) {
 	fprintf(stderr, "lzma data corrupt!\n");
-	exit(1);
+        return 0;
     }
+#if defined(DEBUG)
+    fprintf(stderr, "ret %d\n", ret);
+#endif
     assert (ret == LZMA_OK);
     /* don't use lzma_end (will free buffers) or LZMA_FINISH (will forbid any new use) */
+    return 1;
 }
 
 void clic_free_lzma()

@@ -55,7 +55,10 @@ int main(int argc, char *argv[])
 	if (readin == 0) {
 	    return 1;
 	}
-	clic_decompress_part(outbuf, inbuf, readin);
+	if (!clic_decompress_part(outbuf, inbuf, readin))
+        {
+          /* continue - TODO: make this an option */
+        }
 
 	for (page = 0; page < num_pages; ++page)
 	{
