@@ -488,7 +488,7 @@ static int clic_detach(size_t block, int islocked)
     {
 	if (PTR_CLASS(ptr) == CLASS_COW) {
 	    if (cows_index == CLICFS_COW_COUNT - 1)
-		clic_write_cow(0);
+		clic_write_cow(1);
 	}
 
 	char *newptr = malloc(pagesize);
