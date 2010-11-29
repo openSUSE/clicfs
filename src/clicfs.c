@@ -67,8 +67,9 @@ static int clic_write_cow(int islocked)
     //if (logger) fprintf(logger, "cow detached %dMB\n", (int)(detached_allocated / 1024));
     if (logger) fprintf(logger, "clic_write_cow %ld\n", pthread_self());
     
-    if (!islocked)
-	pthread_mutex_lock(&cowfile_mutex_writer);
+    if (!islocked) {
+	    pthread_mutex_lock(&cowfile_mutex_writer);
+    }
     pthread_mutex_lock(&cowfile_mutex);
 
     uint32_t i;
@@ -123,7 +124,7 @@ static int clic_write_cow(int islocked)
 	{
 	    long ptr = (long)blockmap[i];
 	    if (PTR_CLASS(ptr) == CLASS_COW) { // block
-		if ((ptr >> 2) == moving) {
+		if ((uint32_t)(ptr >> 2) == moving) {
 		    if (logger) fprintf(logger, "moving %ld %ld\n", (long)moving, (long)i);
 		    clic_detach(i, 1);
 		    moved++;
@@ -297,7 +298,7 @@ static void clic_dump_use()
 	return;
 
     struct buffer_combo *c =  coms_sort_by_use_first;
-    fprintf(logger, "dump %ldMB ", memory_used / 1024 / 1024);
+    fprintf(logger, "dump %ldMB ", (long int)memory_used / 1024 / 1024);
     while (c) {
 	fprintf(logger, "%ld ", (long)c->part);
 	c = c->next_by_use;
@@ -542,7 +543,7 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     if (offset >= (off_t)thefilesize)
         return 0;
 
-    if (offset+size > thefilesize)
+    if (offset+size > (off_t)thefilesize)
 	size = thefilesize-offset;
 
     if (!size)
@@ -729,9 +730,7 @@ static void clic_destroy(void *arg)
 {
     (void)arg;
     if (logger) fprintf(logger, "destroy\n");
-    //pthread_cancel(clic_sync_tid);
-    void *res;
-    pthread_join(clic_sync_tid, &res);
+    pthread_cancel(clic_sync_tid);
 }
 
 
