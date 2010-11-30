@@ -704,8 +704,11 @@ static void clic_destroy(void *arg)
 {
     (void)arg;
     if (logger) fprintf(logger, "destroy\n");
-    if (clic_sync_tid > 0)
+    if (clic_sync_tid > 0) {
       pthread_cancel(clic_sync_tid);
+      void *res;
+      pthread_join(clic_sync_tid, &res);
+    }
 }
 
 
