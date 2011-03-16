@@ -46,7 +46,8 @@ size_t blocksize_small = 0;
 unsigned char **blockmap;
 uint32_t num_pages = 0;
 uint32_t cow_pages = 0;
-uint32_t cow_index_pages = 0;
+off_t cow_index_start = 0;
+off_t cow_pages_start = 0;
 uint32_t *cows = 0;
 unsigned int cows_index = 0;
 int cowfile_ro = 0;
@@ -108,19 +109,22 @@ int clicfs_read_cow(const char *cowfilename)
     for (i = num_pages; i < newpages; ++i)
 	blockmap[i] = 0;
     num_pages = newpages;
-    cow_pages = clic_readindex_fd(cowfilefd);
-    for (i = 0; i < cow_pages; ++i)
+    cow_pages = 0;
+    for (i = 0; i < num_pages; ++i)
     {
-	uint32_t pageindex = clic_readindex_fd(cowfilefd);
 	uint32_t page = clic_readindex_fd(cowfilefd);
-	assert(pageindex < num_pages);
-	blockmap[pageindex] = (unsigned char*)(long)(page << 2) + 2;
+	if (page) {
+	  blockmap[i] = (unsigned char*)(long)(page << 2) + CLASS_COW;
+	  cow_pages++;
+	}
     }
     cows = malloc(sizeof(uint32_t) * CLICFS_COW_COUNT);
     cows_index = 0;
     
-    uint32_t index_len = clic_readindex_fd(cowfilefd);
-    cow_index_pages = index_len / pagesize + 1;
+    cow_index_start = ((9 + sizeof(uint64_t) + num_pages * sizeof(uint32_t)) / pagesize + 1 ) * pagesize;
+    cow_pages_start = cow_index_start + num_pages * sizeof(uint32_t) * 2;
+    // we do not round up but down here as cow pages start with 1
+    cow_pages_start = ( cow_pages_start / pagesize + 0) * pagesize;
 
     return 0;
 }

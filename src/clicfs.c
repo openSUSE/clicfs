@@ -47,9 +47,12 @@ static struct timeval start;
 
 static uint32_t clic_find_next_cow()
 {
-    if (cows_index > 0)
-	return cows[--cows_index];
-    return cow_pages + cow_index_pages;
+  if (cows_index > 0) {
+    if (logger) fprintf(logger, "find_next (old): %d\n", cows[cows_index-1]);
+    return cows[--cows_index];
+  }
+  if (logger) fprintf(logger, "find_next (new): %d\n", cow_pages + 1);
+  return cow_pages + 1;
 }
 
 static int clic_detach(size_t block, int islock);
@@ -68,19 +71,14 @@ static int clic_write_cow(int islocked)
     if (logger) fprintf(logger, "cow detached %dMB\n", (int)(detached_allocated / 1024));
     if (logger) fprintf(logger, "clic_write_cow %ld\n", pthread_self());
     
-    if (!islocked) {
-	    pthread_mutex_lock(&cowfile_mutex_writer);
-    }
-    pthread_mutex_lock(&cowfile_mutex);
-
     uint32_t i;
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
 	if ( ptr && PTR_CLASS(ptr) == CLASS_MEMORY ) { // detached now
 	    off_t cowindex = clic_find_next_cow();
-	    ssize_t pret = pwrite(cowfilefd, blockmap[i], pagesize, cowindex * pagesize);
-	    if (logger) fprintf(logger, "pwrote2 %ld %ld\n", pagesize, pret);
+	    ssize_t pret = pwrite(cowfilefd, blockmap[i], pagesize, cowindex * pagesize + cow_pages_start);
+	    if (logger) fprintf(logger, "pwrote %ld %ld -> %ld\n", pagesize, cowindex * pagesize + cow_pages_start, pret);
 	    if (pret < 0) {
 	      if (logger) fprintf(logger, "failed %s\n", strerror(errno));
 	      ret = errno;
@@ -89,98 +87,18 @@ static int clic_write_cow(int islocked)
 	    assert(pret == (ssize_t)pagesize);
 	    free(blockmap[i]);
 	    detached_allocated -= (pagesize / 1024);
-	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + 2;
+	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + CLASS_COW;
+	    uint32_t key = i, value = ptr >> 2;
+	    off_t offset = cow_index_start + i * sizeof(uint32_t);
+	    pret = pwrite(cowfilefd, (char*)&value, sizeof(uint32_t), offset);
+	    if (logger) fprintf(logger, "pwrote2 %ld %ld -> %ld\n", sizeof(uint32_t), offset, pret);
 	    cow_pages++;
 	}
     }
 
-    cow_pages = num_pages;
-
     assert(!detached_allocated);
 
-    off_t seeked = lseek(cowfilefd, 0, SEEK_SET); 
-    if (logger) fprintf(logger, "seek %ld\n", seeked);
-    assert(seeked == 0);
-    uint64_t stringlen = thefilesize;
-
-    char head[10];
-    sprintf(head, "CLICCOW%02d", DOENER_MAGIC);
-    uint32_t index_len = write(cowfilefd, head, 9);
-
-    index_len += write(cowfilefd, (char*)&stringlen, sizeof(uint64_t));
-    stringlen = cow_pages;
-    index_len += write(cowfilefd, (char*)&stringlen, sizeof(uint32_t));
-    stringlen = 0;
-
-    index_len += 2 * sizeof(uint32_t) * cow_pages;
-    uint32_t new_cow_index_pages = index_len / pagesize + 1;
-    uint32_t moving;
-    uint32_t moved = 0;
-
-    if (logger) fprintf(logger, "cows_index %d\n", cows_index);
-    // should all be out
-    assert(cows_index == 0);
-
-    pthread_mutex_unlock(&cowfile_mutex);
-
-    for (moving = cow_index_pages; moving < new_cow_index_pages; ++moving)
-    {
-	// we only have a map from memory to cow, so we need to 
-	// look up in reverse to find the page to move
-	// if this proves to be slow, we need even more memory
-	// to keep the reverse map
-	for (i = 0; i < num_pages; ++i)
-	{
-	    long ptr = (long)blockmap[i];
-	    if (PTR_CLASS(ptr) == CLASS_COW) { // block
-		if ((uint32_t)(ptr >> 2) == moving) {
-		    if (logger) fprintf(logger, "moving %ld %ld\n", (long)moving, (long)i);
-		    int dret = clic_detach(i, 1);
-		    if (dret) {
-		      ret = dret;
-		      goto exit;
-		    }
-		    moved++;
-		    break;
-		}
-	    }
-	}
-    }
-
-    assert(moved == cows_index);
-
-    cow_index_pages = new_cow_index_pages;
-
-    /* if we moved, we need to redetach */
-    if (moved) {
-	cows_index = 0; 
-	ret = clic_write_cow(1);
-	if (logger) fprintf(logger, "recursive write_cow %d\n", ret);
-	goto exit;
-    }
-
-    pthread_mutex_lock(&cowfile_mutex);
-
-    for (i = 0; i < num_pages; ++i)
-    {
-	long ptr = (long)blockmap[i];
-	if (PTR_CLASS(ptr) == CLASS_COW) { // block
-	    uint32_t key = i, value = ptr >> 2;
-	    write(cowfilefd, (char*)&key, sizeof(uint32_t));
-	    write(cowfilefd, (char*)&value, sizeof(uint32_t));
-	    stringlen++;
-	}
-    }
-
-    assert(stringlen == cow_pages);
-    write(cowfilefd, (char*)&index_len, sizeof(uint32_t));
-
-    pthread_mutex_unlock(&cowfile_mutex);
-    
 exit:
-    if (!islocked)
-	pthread_mutex_unlock(&cowfile_mutex_writer);
-
     if (logger) fprintf(logger, "clic_write_cow %ld done %d\n", pthread_self(), ret);
     return ret;
 }
@@ -392,7 +310,7 @@ static void clic_free_com(struct buffer_combo *com)
 
 static const unsigned char *clic_uncompress(uint32_t part)
 {
-    if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
+    //if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
     time_t now = time(0);
 
     if (coms_sort_by_use_first) // clean up
@@ -493,9 +411,6 @@ static int clic_detach(size_t block, int islocked)
 {
     assert(block < num_pages);
 
-    if (!islocked)
-	pthread_mutex_lock(&cowfile_mutex_writer);
-
     int ret = 0;
 
     unsigned char *ptr = blockmap[block];
@@ -533,9 +448,6 @@ static int clic_detach(size_t block, int islocked)
     }
 
 exit:
-    if (!islocked)
-	pthread_mutex_unlock(&cowfile_mutex_writer);
-
     if (logger) fprintf(logger, "clic_detach done %d\n", ret);
     return ret;
 }
@@ -567,8 +479,6 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     if (!size)
 	return 0;
 
-    pthread_mutex_lock(&cowfile_mutex_writer);
-
     off_t block = offset / pagesize;
     off_t ioff = offset - block * pagesize;
 
@@ -594,7 +504,6 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
 
 	ret = wrote;
     }
-    pthread_mutex_unlock(&cowfile_mutex_writer);
     return ret;
 }
 
@@ -652,7 +561,7 @@ static ssize_t clic_read_block(char *buf, size_t block)
 static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
-    if (logger) fprintf(logger, "read %ld %ld %ld\n", offset, size, thefilesize);
+    //if (logger) fprintf(logger, "read %ld %ld %ld\n", offset, size, thefilesize);
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
@@ -661,8 +570,6 @@ static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 
     assert(size % pagesize == 0);
     assert(offset % pagesize == 0);
-
-    pthread_mutex_lock(&cowfile_mutex_writer);
 
     do
     {
@@ -681,8 +588,6 @@ static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 	offset += diff;
 	readtotal += diff;
     } while (size > 0);
-
-    pthread_mutex_unlock(&cowfile_mutex_writer);
 
     return readtotal;
 }
@@ -737,8 +642,9 @@ static void* clic_init(struct fuse_conn_info *conn)
 {
     // avoid random reads or our profiling will be destroyed
     conn->max_readahead = 0;
+    clic_sync_tid = 0;
 
-    pthread_create(&clic_sync_tid, NULL, clic_sync_thread, 0);
+    //FOR NOWpthread_create(&clic_sync_tid, NULL, clic_sync_thread, 0);
        
     return 0;
 }
@@ -747,7 +653,8 @@ static void clic_destroy(void *arg)
 {
     (void)arg;
     if (logger) fprintf(logger, "destroy\n");
-    pthread_cancel(clic_sync_tid);
+    if (clic_sync_tid > 0)
+      pthread_cancel(clic_sync_tid);
 }
 
 
@@ -825,18 +732,21 @@ static int init_cow()
   
     assert( DOENER_MAGIC < 100 );
     int index_len = fprintf(cow, "CLICCOW%02d", DOENER_MAGIC );
-
     index_len += fwrite((char*)&bigfilesize, 1, sizeof(uint64_t), cow);
-    uint32_t stringlen = 0;
-    // there are 0 blocks
-    index_len += fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
-    // the whole index is 12 bytes long
-    stringlen = index_len + sizeof(uint32_t);
-    index_len += fwrite((char*)&stringlen, 1, sizeof(uint32_t), cow);
-    fclose(cow);
 
-    cow_index_pages = index_len / pagesize + 1;
-    cow_pages = 0;
+    char zeros[sizeof(uint32_t)];
+    memset(zeros, 0, sizeof(uint32_t));
+
+    size_t write_pages = bigfilesize / pagesize;
+    blockmap = realloc(blockmap, sizeof(unsigned char*)*write_pages);
+    unsigned int i;
+    for (i = num_pages; i < write_pages; ++i)
+      blockmap[i] = 0;
+    num_pages = write_pages;
+
+    for (i = 0; i < num_pages; ++i)
+	fwrite(zeros, 1, sizeof(uint32_t), cow);
+    fclose(cow);
 
     return 0;
 }

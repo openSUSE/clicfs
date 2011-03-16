@@ -1,1 +1,9 @@
 This is not really worth the read (yet).
+
+COWFILE FORMAT:
+  9 bytes: CLICCOW%02d
+  8 bytes: file size (including sparse)
+  
+  num_pages*:
+    - 4 bytes: page index in cow (if > 0)
+   

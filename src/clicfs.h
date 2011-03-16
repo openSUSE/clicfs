@@ -53,8 +53,10 @@ extern size_t blocksize_large;
 extern uint32_t num_pages;
 // the number of pages marked as CLASS_COW
 extern uint32_t cow_pages;
-// the number of pages in the cow for index
-extern unsigned int cow_index_pages;
+// the offset in the cow file where the page index starts
+extern off_t cow_index_start;
+// the offset in the cow file where the pages start
+extern off_t cow_pages_start;
 // support temporary changes on ro medium
 extern int cowfile_ro;
 
