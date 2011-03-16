@@ -88,15 +88,16 @@ static int clic_write_cow(int islocked)
 	    free(blockmap[i]);
 	    detached_allocated -= (pagesize / 1024);
 	    blockmap[i] = (unsigned char*)(long)(cowindex << 2) + CLASS_COW;
-	    uint32_t key = i, value = ptr >> 2;
+	    uint32_t value = cowindex;
 	    off_t offset = cow_index_start + i * sizeof(uint32_t);
 	    pret = pwrite(cowfilefd, (char*)&value, sizeof(uint32_t), offset);
-	    if (logger) fprintf(logger, "pwrote2 %ld %ld -> %ld\n", sizeof(uint32_t), offset, pret);
+	    if (logger) fprintf(logger, "pwrote2 %d %d %ld -> %ld\n", i, cowindex, offset, pret);
 	    cow_pages++;
 	}
     }
 
-    assert(!detached_allocated);
+    fdatasync(cowfilefd);
+    // not true for threads assert(!detached_allocated);
 
 exit:
     if (logger) fprintf(logger, "clic_write_cow %ld done %d\n", pthread_self(), ret);
@@ -179,8 +180,6 @@ int32_t coms_sort_by_part_size = 0;
 struct buffer_combo *coms_sort_by_use_first = 0;
 struct buffer_combo *coms_sort_by_use_last = 0;
 static unsigned int com_count = 0;
-
-pthread_mutex_t picker = PTHREAD_MUTEX_INITIALIZER;
 
 FILE *pack;
 
@@ -611,9 +610,7 @@ static int clic_fsync(const char *path, int datasync, struct fuse_file_info *fi)
 
     int ret = clic_write_cow(0);
     last_sync = time(0);
-    pthread_mutex_lock(&cowfile_mutex);
     if (cowfilefd >= 0) fdatasync(cowfilefd);
-    pthread_mutex_unlock(&cowfile_mutex);
     return ret;
 }
 
@@ -644,7 +641,7 @@ static void* clic_init(struct fuse_conn_info *conn)
     conn->max_readahead = 0;
     clic_sync_tid = 0;
 
-    //FOR NOWpthread_create(&clic_sync_tid, NULL, clic_sync_thread, 0);
+    //pthread_create(&clic_sync_tid, NULL, clic_sync_thread, 0);
        
     return 0;
 }
