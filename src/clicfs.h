@@ -23,7 +23,7 @@
 #include <sys/types.h>
 
 extern int preset;
-extern FILE *packfile;
+extern int packfilefd;
 extern int cowfilefd;
 
 // magic 2 added large parts
@@ -71,7 +71,7 @@ extern int clicfs_read_cow(const char *packfilename);
 extern int clic_decompress_part(unsigned char *out, const unsigned char *in, size_t size);
 extern size_t clic_readpart(unsigned char *buffer, int part);
 extern off_t clic_map_block(off_t block);
-extern uint32_t clic_readindex_fd(int fd );
+extern uint32_t clic_readindex_fd( int fd );
 extern void clic_free_lzma();
 
 extern void clic_find_block( off_t block, off_t *part, off_t *offset );

@@ -16,6 +16,8 @@
    02110-1301, USA
 */
 
+#define _GNU_SOURCE
+
 #include "clicfs.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +30,7 @@
 #include <fcntl.h>
 
 int preset = 0;
-FILE *packfile = 0;
+int packfilefd = -1;
 int cowfilefd = -1;
 
 char thefile[PATH_MAX];
@@ -64,15 +66,6 @@ uint64_t clic_readindex_fd64(int fd)
 {
     uint64_t stringlen = 0;
     if (read(fd, &stringlen, sizeof(uint64_t)) != sizeof(uint64_t)) {
-        return 0;
-    }
-    return stringlen;
-}
-
-uint32_t clic_readindex_file(FILE * f)
-{
-    uint32_t stringlen = 0;
-    if (fread(&stringlen, 1, sizeof(uint32_t), f) != sizeof(uint32_t)) {
         return 0;
     }
     return stringlen;
@@ -134,14 +127,17 @@ int clicfs_read_cow(const char *cowfilename)
 
 int clicfs_read_pack(const char *packfilename)
 {
-    packfile = fopen(packfilename, "r");
-    if (!packfile) {
+    packfilefd = open(packfilename, O_LARGEFILE|O_RDONLY);
+    if (packfilefd < 0) {
         fprintf(stderr, "packfile %s can't be opened\n", packfilename);
         return 1;
     }
     char head[7];
     char expected[7];
-    fread(head, 1, 6, packfile);
+    if (read(packfilefd, head, 6) != 6) {
+      perror("can't read from packfile\n");
+      return 1;
+    }
     head[6] = 0;
     sprintf(expected, "CLIC%02d", DOENER_MAGIC);
     if (strcmp(head,expected)) {
@@ -149,46 +145,46 @@ int clicfs_read_pack(const char *packfilename)
 	return 1;
     }
 
-    uint32_t stringlen = clic_readindex_file(packfile);
+    uint32_t stringlen = clic_readindex_fd(packfilefd);
     if (stringlen == 0 || stringlen >= PATH_MAX) {
 	fprintf(stderr, "abnormal len %lx\n", (long)stringlen); 
         return 1;
     }
-    if (fread(thefile, 1, stringlen, packfile) != stringlen) {
+    if (read(packfilefd, thefile, stringlen) != stringlen) {
 	fprintf(stderr, "short read %ld\n", (long)stringlen);
 	return 1;
     }
     thefile[stringlen] = 0;
 
-    uint64_t oparts = clic_readindex_file(packfile);
-    blocksize_small = clic_readindex_file(packfile);
-    blocksize_large = clic_readindex_file(packfile);
-    pagesize = clic_readindex_file(packfile);
+    uint64_t oparts = clic_readindex_fd(packfilefd);
+    blocksize_small = clic_readindex_fd(packfilefd);
+    blocksize_large = clic_readindex_fd(packfilefd);
+    pagesize = clic_readindex_fd(packfilefd);
     thefilesize = oparts * blocksize_small * pagesize;
-    preset = clic_readindex_file(packfile);
-    num_pages = clic_readindex_file(packfile);
+    preset = clic_readindex_fd(packfilefd);
+    num_pages = clic_readindex_fd(packfilefd);
     blockmap = malloc(sizeof(unsigned char*)*num_pages);
 
     uint32_t i;
     for (i = 0; i < num_pages; ++i) {
 	// make sure it's odd to diff between pointer and block
-	blockmap[i] = (unsigned char*)(long)((clic_readindex_file(packfile) << 2) + 1);
+	blockmap[i] = (unsigned char*)(long)((clic_readindex_fd(packfilefd) << 2) + 1);
     }
 
-    parts = clic_readindex_file(packfile);
-    largeparts = clic_readindex_file(packfile);
+    parts = clic_readindex_fd(packfilefd);
+    largeparts = clic_readindex_fd(packfilefd);
     sizes = malloc(sizeof(uint64_t)*parts);
     offs = malloc(sizeof(uint64_t)*parts);
 
     for (i = 0; i < parts; ++i)
     {
-	if (fread((char*)(sizes + i), sizeof(uint64_t), 1, packfile) != 1)
+        if (read(packfilefd, (char*)(sizes + i), sizeof(uint64_t)) != sizeof(uint64_t))
 		parts = 0;
 	if (!sizes[i]) {
 		fprintf(stderr, "unreasonable size 0 for part %d\n", i);
 		return 1;
         }
-	if (fread((char*)(offs + i), sizeof(uint64_t), 1, packfile) != 1)
+	if (read(packfilefd, (char*)(offs + i), sizeof(uint64_t)) != sizeof(uint64_t))
 		parts = 0;
 	if (i > 0 && offs[i] <= offs[i-1]) {
 	  fprintf(stderr, "the offset for i is not larger than i-1: %ld\n", (long)i);
@@ -199,7 +195,7 @@ int clicfs_read_pack(const char *packfilename)
         fprintf(stderr, "unreasonable part number 0\n");
 	return 1;
     }
-    fseeko(packfile, (oparts-parts)*sizeof(uint64_t)*2, SEEK_CUR);
+    lseek(packfilefd, (oparts-parts)*sizeof(uint64_t)*2, SEEK_CUR);
 
     const uint32_t flags = LZMA_TELL_UNSUPPORTED_CHECK | LZMA_CONCATENATED;
     // C sucks
@@ -224,15 +220,11 @@ off_t clic_map_block(off_t block)
 
 size_t clic_readpart(unsigned char *buffer, int part)
 {
-    if (fseeko(packfile, offs[part], SEEK_SET)) {
-	fprintf(stderr, "seek failed %d %lld\n", part, (long long)offs[part]);
-	return 0;
-    }
 #if defined(DEBUG)
     fprintf(stderr, "uncompress part=%d/%d off=%ld size=%ld\n", part, parts, offs[part], sizes[part] );
 #endif
-    size_t readin = fread(buffer, 1, sizes[part], packfile);
-    if (readin != sizes[part]) {
+    ssize_t readin = pread(packfilefd, buffer, sizes[part], offs[part]);
+    if (readin != (ssize_t)sizes[part]) {
 	fprintf(stderr, "short read: %d %ld %ld %ld\n", part, (long)offs[part], (long)sizes[part], (long)readin);
 	// returning half read blocks won't help lzma
 	return 0;
