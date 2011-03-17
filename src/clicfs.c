@@ -48,20 +48,21 @@ static struct timeval start;
 static uint32_t clic_find_next_cow()
 {
   if (cows_index > 0) {
-    if (logger) fprintf(logger, "find_next (old): %d\n", cows[cows_index-1]);
+    //if (logger) fprintf(logger, "find_next (old): %d\n", cows[cows_index-1]);
     return cows[--cows_index];
   }
-  if (logger) fprintf(logger, "find_next (new): %d\n", cow_pages + 1);
+  //if (logger) fprintf(logger, "find_next (new): %d\n", cow_pages + 1);
   return cow_pages + 1;
 }
 
-static int clic_detach(size_t block, int islock);
+static int clic_detach(size_t block);
 static int clic_write_cow();
 
 pthread_mutex_t cowfile_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cowfile_mutex_writer = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t coms_by_part_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int clic_write_cow(int islocked)
+static int clic_write_cow()
 {
     if (!cowfilename || cowfile_ro == 1 || !detached_allocated)
 	return 0;
@@ -71,6 +72,8 @@ static int clic_write_cow(int islocked)
     if (logger) fprintf(logger, "cow detached %dMB\n", (int)(detached_allocated / 1024));
     if (logger) fprintf(logger, "clic_write_cow %ld\n", pthread_self());
     
+    pthread_mutex_lock(&cowfile_mutex);
+
     uint32_t i;
     for (i = 0; i < num_pages; ++i)
     {
@@ -78,10 +81,12 @@ static int clic_write_cow(int islocked)
 	if ( ptr && PTR_CLASS(ptr) == CLASS_MEMORY ) { // detached now
 	    off_t cowindex = clic_find_next_cow();
 	    ssize_t pret = pwrite(cowfilefd, blockmap[i], pagesize, cowindex * pagesize + cow_pages_start);
-	    if (logger) fprintf(logger, "pwrote %ld %ld -> %ld\n", pagesize, cowindex * pagesize + cow_pages_start, pret);
+	    //if (logger) fprintf(logger, "pwrote %ld %ld -> %ld\n", pagesize, cowindex * pagesize + cow_pages_start, pret);
 	    if (pret < 0) {
+	      perror("pwrite cow");
 	      if (logger) fprintf(logger, "failed %s\n", strerror(errno));
-	      ret = errno;
+	      ret = -errno;
+	      cowfile_ro = 1;
 	      goto exit;
 	    }
 	    assert(pret == (ssize_t)pagesize);
@@ -91,15 +96,21 @@ static int clic_write_cow(int islocked)
 	    uint32_t value = cowindex;
 	    off_t offset = cow_index_start + i * sizeof(uint32_t);
 	    pret = pwrite(cowfilefd, (char*)&value, sizeof(uint32_t), offset);
-	    if (logger) fprintf(logger, "pwrote2 %d %d %ld -> %ld\n", i, cowindex, offset, pret);
+	    if (pret < 0) {
+	    	perror("pwrite2 cow");
+		ret = -errno;
+	    }
+	    //if (logger) fprintf(logger, "pwrote2 %d %d %ld -> %ld\n", i, cowindex, offset, pret);
 	    cow_pages++;
 	}
     }
 
     fdatasync(cowfilefd);
+    last_sync = time(0);
     // not true for threads assert(!detached_allocated);
 
 exit:
+    pthread_mutex_unlock(&cowfile_mutex);
     if (logger) fprintf(logger, "clic_write_cow %ld done %d\n", pthread_self(), ret);
     return ret;
 }
@@ -212,6 +223,7 @@ static void clic_insert_com(struct buffer_combo *com, int32_t after)
 	return;
     }
     if (coms_sort_by_part_size == after + 1) { // just append
+        assert(coms_sort_by_part_size < MAX_COMS_SIZE);
 	coms_by_part[coms_sort_by_part_size] = com;
     } else {
 	// I don't like memmove
@@ -219,6 +231,7 @@ static void clic_insert_com(struct buffer_combo *com, int32_t after)
 	for (i = coms_sort_by_part_size-1; i > after; i--)
 	    coms_by_part[i+1] = coms_by_part[i];
 	coms_by_part[after+1] = com;
+	assert(after + 1 < MAX_COMS_SIZE);
     }
     coms_sort_by_part_size++;
     clic_append_by_use(com);
@@ -312,6 +325,8 @@ static const unsigned char *clic_uncompress(uint32_t part)
     //if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
     time_t now = time(0);
 
+    pthread_mutex_lock(&coms_by_part_mutex);
+
     if (coms_sort_by_use_first) // clean up
     {
 	if (0) clic_dump_use();
@@ -330,6 +345,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
 	com->last_used = now;
 	clic_remove_com_from_use(com);
 	clic_append_by_use(com);
+	pthread_mutex_unlock(&coms_by_part_mutex);
 	return buf;
     }
 
@@ -341,7 +357,10 @@ static const unsigned char *clic_uncompress(uint32_t part)
 	clic_free_com(coms_sort_by_use_first);
     }
 
+    pthread_mutex_unlock(&coms_by_part_mutex);
+
     struct buffer_combo *com = malloc(sizeof(struct buffer_combo));
+    assert(com);
     memory_used += sizeof(struct buffer_combo);
     if (part < largeparts) {
 	com->out_buffer_size = blocksize_large*pagesize;
@@ -355,6 +374,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
     } else {
 	com->out_buffer_size = blocksize_small*pagesize;
 	com->out_buffer = malloc(blocksize_small*pagesize);
+	assert(com->out_buffer);
 	com->mmapped = 0;
     }
     memory_used += com->out_buffer_size;
@@ -364,6 +384,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
     clic_insert_com(com, res);
 
     unsigned char *inbuffer = malloc(sizes[part]);
+    assert(inbuffer);
     struct timeval begin, end;
     gettimeofday(&begin, 0);
     size_t readin = clic_readpart(inbuffer, part);
@@ -406,29 +427,40 @@ static void clic_log_access(size_t block)
 
 static ssize_t clic_read_block(char *buf, size_t block);
 
-static int clic_detach(size_t block, int islocked)
+static int clic_detach(size_t block)
 {
     assert(block < num_pages);
 
     int ret = 0;
+    //if (logger) fprintf(logger, "clic_detach\n");
 
     unsigned char *ptr = blockmap[block];
+    //if (logger) fprintf(logger, "clic_detach1 %ld\n", PTR_CLASS(ptr));
     if ((PTR_CLASS(ptr) == CLASS_RO ) || (PTR_CLASS(ptr) == CLASS_COW))
     {
 	if (PTR_CLASS(ptr) == CLASS_COW) {
+	  if (logger) fprintf(logger, "detach2 cow %cows_index\n", cows_index);
 	  if (cows_index == CLICFS_COW_COUNT - 1) {
-	    ret = clic_write_cow(1);
+	    ret = clic_write_cow();
 	    if (logger) fprintf(logger, "detach cow %d\n", ret);
 	  }
 	}
 
+	if (cowfilename && cowfile_ro == 1) {
+	  ret = -EROFS;
+	  goto exit;
+	}
+
 	char *newptr = malloc(pagesize);
+	assert(newptr);
+	//if (logger) fprintf(logger, "clic_detach3 %ld\n", PTR_CLASS(newptr));
 	detached_allocated += (pagesize / 1024);
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 
 	clic_read_block(newptr, block);
-	if (PTR_CLASS(ptr) == CLASS_COW) { // we need to mark the place in the cow obsolete
+	if (PTR_CLASS(ptr) == CLASS_COW && !cowfile_ro) { // we need to mark the place in the cow obsolete
 	    if (logger) fprintf(logger, "detach block %ld (was %ld)\n", (long)block, (long)ptr >> 2);
+	    assert(cows_index < CLICFS_COW_COUNT);
 	    cows[cows_index++] = (long)ptr >> 2;
 	    cow_pages--;
 	}
@@ -437,46 +469,63 @@ static int clic_detach(size_t block, int islocked)
 	goto exit;
     }
 
+    //if (logger) fprintf(logger, "clic_detach2 %p\n", blockmap[block]);
     if (!blockmap[block])
     {
-	blockmap[block] = malloc(pagesize);
-	assert(PTR_CLASS(ptr) == CLASS_MEMORY);
+      if (cowfilename && cowfile_ro == 1) {
+	  ret = -EROFS;
+	  goto exit;
+      }
+
+        blockmap[block] = malloc(pagesize);
+	//if (logger) fprintf(logger, "clic_detach4 %p\n", blockmap[block]);
+	assert(blockmap[block]);
+	//assert(PTR_CLASS(ptr) == CLASS_MEMORY);
 	detached_allocated += (pagesize / 1024);
 	if (logger && detached_allocated % 1024 == 0 ) fprintf(logger, "detached %dMB\n", (int)(detached_allocated / 1024));
 	memset(blockmap[block],0,pagesize);
     }
 
 exit:
-    if (logger) fprintf(logger, "clic_detach done %d\n", ret);
+    //if (logger) fprintf(logger, "clic_detach done %d\n", ret);
     return ret;
 }
 
 static size_t clic_write_block(const char *buf, off_t block, off_t ioff, size_t size)
 {
-    if (clic_detach(block, 1)) {
-      if (logger) fprintf(logger, "clic_detach failed\n");
+    //if (logger) fprintf(logger, "clic_write_block %ld\n", detached_allocated);
+    if (clic_detach(block)) {
+      if (logger) fprintf(logger, "clic_detach FAILED\n");
       return -ENOSPC;
     }
     memcpy(blockmap[block]+ioff, buf, size);
+
+    if (detached_allocated > 4000) 
+      clic_write_cow();
+
     return size;
 }
 
 static int clic_write(const char *path, const char *buf, size_t size, off_t offset,
 		       struct fuse_file_info *fi)
 {
-    if (logger) fprintf(logger, "write %s %ld %ld\n", path, offset, size);
+  //if (logger) fprintf(logger, "write1 %s %ld %ld\n", path, offset, size);
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
 
-    if (offset >= (off_t)thefilesize)
+    if (offset >= (off_t)thefilesize) {
+      //if (logger) fprintf(logger, "write %s %ld %ld -> 0!!\n", path, offset, size);
         return 0;
+    }
 
     if ((off_t)(offset+size) > (off_t)thefilesize)
 	size = thefilesize-offset;
 
-    if (!size)
+    if (!size) {
+      //if (logger) fprintf(logger, "write %s %ld %ld -> 0!!\n", path, offset, size);
 	return 0;
+    }
 
     off_t block = offset / pagesize;
     off_t ioff = offset - block * pagesize;
@@ -488,12 +537,16 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     int ret = 0;
 
     if (size <= pagesize) {
+      //if (logger) fprintf(logger, "write2 %s %ld %ld\n", path, offset, size);
         ret = clic_write_block(buf, block, ioff, size);
+	//if (logger) fprintf(logger, "write3 %s %ld %ld -> %d\n", path, offset, size, ret);
     } else {
 	size_t wrote = 0;
 	do
 	{
+	  //if (logger) fprintf(logger, "write4 %s %ld %ld\n", path, offset, size);
 	    size_t diff = clic_write_block(buf, block, ioff, size > pagesize ? pagesize : size);
+	    //if (logger) fprintf(logger, "write5 %s %ld %ld -> %ld\n", path, offset, size, diff);
 	    ioff = 0;
 	    size -= diff;
 	    buf += diff;
@@ -503,12 +556,13 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
 
 	ret = wrote;
     }
+    //if (logger) fprintf(logger, "write %s %ld %ld -> %d\n", path, offset, size, ret);
     return ret;
 }
 
 static ssize_t clic_read_block(char *buf, size_t block)
 {
-    if (block >= num_pages)
+  if (block >= num_pages)
 	return -EFAULT;
 
     if (!blockmap[block]) { // sparse block 
@@ -560,7 +614,7 @@ static ssize_t clic_read_block(char *buf, size_t block)
 static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
-    //if (logger) fprintf(logger, "read %ld %ld %ld\n", offset, size, thefilesize);
+  // if (logger) fprintf(logger, "read %ld %ld %ld\n", offset, size, thefilesize);
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
@@ -577,7 +631,8 @@ static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 	off_t block = offset / pagesize;
 	ssize_t diff = clic_read_block(buf, block);
 	if (diff < 0) {
-	    return diff;
+	  //if (logger) fprintf(logger, "read %ld %ld %ld -> %ld!!\n", offset, size, thefilesize, diff);
+	  return diff;
 	}
 	//if (logger) fprintf(logger, "read block %ld: %ld bytes\n", (long)block, (long)diff);
 	if (!diff)
@@ -588,6 +643,7 @@ static int clic_read(const char *path, char *buf, size_t size, off_t offset,
 	readtotal += diff;
     } while (size > 0);
 
+    //if (logger) fprintf(logger, "read %ld %ld %ld -> %ld\n", offset, size, thefilesize, readtotal);
     return readtotal;
 }
   
@@ -597,7 +653,7 @@ static int clic_flush(const char *path, struct fuse_file_info *fi)
     (void)fi;
     // TODO write out cow
     if (logger)	{ fprintf(logger, "flush\n"); fflush(logger); }
-    return clic_write_cow(0);
+    return clic_write_cow();
 }
 
 static int clic_fsync(const char *path, int datasync, struct fuse_file_info *fi)
@@ -608,9 +664,7 @@ static int clic_fsync(const char *path, int datasync, struct fuse_file_info *fi)
     // TODO write out cow
     if (logger) { fprintf(logger, "sync\n"); fflush(logger); }
 
-    int ret = clic_write_cow(0);
-    last_sync = time(0);
-    if (cowfilefd >= 0) fdatasync(cowfilefd);
+    int ret = clic_write_cow();
     return ret;
 }
 
@@ -771,6 +825,7 @@ int main(int argc, char *argv[])
 
     // not sure why but multiple threads make it slower
     fuse_opt_add_arg(&args, "-s");
+    fuse_opt_add_arg(&args, "-obig_writes");
 
     if (!packfilename) {
 	fprintf(stderr, "usage: [-m <mb>] [-l <logfile|->] [-c <cowfile>] <packfile> <mntpoint>\n");
@@ -783,6 +838,12 @@ int main(int argc, char *argv[])
     }
 
     free(packfilename);
+
+    int procfile = open("/proc/self/om_score_adj", O_WRONLY);
+    if (procfile > 0) {
+      write(procfile, "-1000", sizeof("-1000"));
+      close(procfile);
+    }
 
     if (cowfilename) {
       
@@ -816,10 +877,11 @@ int main(int argc, char *argv[])
 	posix_fadvise( packfilefd, offs[i], sizes[i], POSIX_FADV_SEQUENTIAL);
     }
     coms_by_part = malloc(sizeof(struct buffer_combo*)*MAX_COMS_SIZE);
+    assert(coms_by_part);
     gettimeofday(&start, 0);
     /* MAIN LOOP */
     int ret = fuse_main(args.argc, args.argv, &clic_oper, NULL);
-    clic_write_cow(0); // ignored
+    clic_write_cow(); // ignored
     if (cowfilefd >= 0) close(cowfilefd);
     
     if (logger) fclose(logger);
