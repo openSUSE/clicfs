@@ -526,7 +526,7 @@ static ssize_t clic_read_block(char *buf, size_t block)
     if (PTR_CLASS(ptr) == CLASS_COW) {
 	off_t target = ptr >> 2;
 	pthread_mutex_lock(&cowfile_mutex);
-	ssize_t haveread = pread(cowfilefd, buf, pagesize, target * pagesize);
+	ssize_t haveread = pread(cowfilefd, buf, pagesize, target * pagesize + cow_pages_start);
 	pthread_mutex_unlock(&cowfile_mutex);
 	return haveread;
     }

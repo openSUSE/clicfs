@@ -113,7 +113,6 @@ int clicfs_read_cow(const char *cowfilename)
     for (i = 0; i < num_pages; ++i)
     {
 	uint32_t page = clic_readindex_fd(cowfilefd);
-	fprintf(stderr, "cow %d %d\n", i, page);
 	if (page) {
 	  blockmap[i] = (unsigned char*)(long)(page << 2) + CLASS_COW;
 	  cow_pages++;
