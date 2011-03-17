@@ -439,7 +439,7 @@ static int clic_detach(size_t block)
     if ((PTR_CLASS(ptr) == CLASS_RO ) || (PTR_CLASS(ptr) == CLASS_COW))
     {
 	if (PTR_CLASS(ptr) == CLASS_COW) {
-	  if (logger) fprintf(logger, "detach2 cow %cows_index\n", cows_index);
+	  if (logger) fprintf(logger, "detach2 cow %d index\n", cows_index);
 	  if (cows_index == CLICFS_COW_COUNT - 1) {
 	    ret = clic_write_cow();
 	    if (logger) fprintf(logger, "detach cow %d\n", ret);
@@ -500,7 +500,7 @@ static size_t clic_write_block(const char *buf, off_t block, off_t ioff, size_t 
     }
     memcpy(blockmap[block]+ioff, buf, size);
 
-    if (detached_allocated > 4000) 
+    if (detached_allocated > 40000) 
       clic_write_cow();
 
     return size;
@@ -509,7 +509,7 @@ static size_t clic_write_block(const char *buf, off_t block, off_t ioff, size_t 
 static int clic_write(const char *path, const char *buf, size_t size, off_t offset,
 		       struct fuse_file_info *fi)
 {
-  //if (logger) fprintf(logger, "write1 %s %ld %ld\n", path, offset, size);
+    // if (logger) fprintf(logger, "write %s %ld %ld %lx\n", path, offset, size, pthread_self());
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
@@ -695,7 +695,7 @@ static void* clic_init(struct fuse_conn_info *conn)
     conn->max_readahead = 0;
     clic_sync_tid = 0;
 
-    //pthread_create(&clic_sync_tid, NULL, clic_sync_thread, 0);
+    pthread_create(&clic_sync_tid, NULL, clic_sync_thread, 0);
        
     return 0;
 }
@@ -824,7 +824,7 @@ int main(int argc, char *argv[])
     }
 
     // not sure why but multiple threads make it slower
-    fuse_opt_add_arg(&args, "-s");
+    //fuse_opt_add_arg(&args, "-s");
     fuse_opt_add_arg(&args, "-obig_writes");
 
     if (!packfilename) {
