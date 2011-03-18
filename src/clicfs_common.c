@@ -17,6 +17,7 @@
 */
 
 #define _GNU_SOURCE
+//#define DEBUG 1
 
 #include "clicfs.h"
 #include <stdio.h>
@@ -28,6 +29,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 int preset = 0;
 int packfilefd = -1;
@@ -53,6 +55,7 @@ unsigned int cows_index = 0;
 int cowfile_ro = 0;
 
 static lzma_stream strm;
+static pthread_mutex_t lzma_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 uint32_t clic_readindex_fd(int fd)
 {
@@ -238,6 +241,7 @@ size_t clic_readpart(unsigned char *buffer, int part)
 
 int clic_decompress_part(unsigned char *out, const unsigned char *in, size_t readin)
 {
+    pthread_mutex_lock(&lzma_mutex);
     strm.next_in = in;
     strm.avail_in = readin;
     strm.next_out = out;
@@ -260,12 +264,14 @@ int clic_decompress_part(unsigned char *out, const unsigned char *in, size_t rea
 
     if (ret == LZMA_DATA_ERROR) {
 	fprintf(stderr, "lzma data corrupt!\n");
+        pthread_mutex_unlock(&lzma_mutex);
         return 0;
     }
 #if defined(DEBUG)
     fprintf(stderr, "ret %d\n", ret);
 #endif
     assert (ret == LZMA_OK);
+    pthread_mutex_unlock(&lzma_mutex);
     /* don't use lzma_end (will free buffers) or LZMA_FINISH (will forbid any new use) */
     return 1;
 }

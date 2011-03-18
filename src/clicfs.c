@@ -357,8 +357,6 @@ static const unsigned char *clic_uncompress(uint32_t part)
 	clic_free_com(coms_sort_by_use_first);
     }
 
-    pthread_mutex_unlock(&coms_by_part_mutex);
-
     struct buffer_combo *com = malloc(sizeof(struct buffer_combo));
     assert(com);
     memory_used += sizeof(struct buffer_combo);
@@ -383,6 +381,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
 
     clic_insert_com(com, res);
 
+    pthread_mutex_unlock(&coms_by_part_mutex);
     unsigned char *inbuffer = malloc(sizes[part]);
     assert(inbuffer);
     struct timeval begin, end;
@@ -398,7 +397,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
     if (logger) fprintf(logger, "uncompress %d %ld-%ld %ld (read took %ld - started %ld)\n", part, (long)offs[part], (long)sizes[part], (long)readin, (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000, (begin.tv_sec - start.tv_sec) * 1000 + (begin.tv_usec - start.tv_usec) / 1000 );
 #endif
     if (!clic_decompress_part(com->out_buffer, inbuffer, readin)) {
-      if (logger) fprintf(logger, "uncompess of part %d failed - ignoring", part);
+      if (logger) fprintf(logger, "uncompess of part %d failed - ignoring\n", part);
     }
     free(inbuffer);
 
@@ -509,13 +508,13 @@ static size_t clic_write_block(const char *buf, off_t block, off_t ioff, size_t 
 static int clic_write(const char *path, const char *buf, size_t size, off_t offset,
 		       struct fuse_file_info *fi)
 {
-    // if (logger) fprintf(logger, "write %s %ld %ld %lx\n", path, offset, size, pthread_self());
+    if (logger) fprintf(logger, "%lx write0 %s %ld %ld %lx\n", pthread_self(), path, offset, size, pthread_self());
     (void) fi;
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
 
     if (offset >= (off_t)thefilesize) {
-      //if (logger) fprintf(logger, "write %s %ld %ld -> 0!!\n", path, offset, size);
+      if (logger) fprintf(logger, "%lx writeF %s %ld %ld -> 0!! %lx\n", pthread_self(), path, offset, size, pthread_self());
         return 0;
     }
 
@@ -523,7 +522,7 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
 	size = thefilesize-offset;
 
     if (!size) {
-      //if (logger) fprintf(logger, "write %s %ld %ld -> 0!!\n", path, offset, size);
+      if (logger) fprintf(logger, "%lx write %s %ld %ld -> 0!!\n", pthread_self(), path, offset, size);
 	return 0;
     }
 
@@ -537,16 +536,16 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     int ret = 0;
 
     if (size <= pagesize) {
-      //if (logger) fprintf(logger, "write2 %s %ld %ld\n", path, offset, size);
+      if (logger) fprintf(logger, "%lx write2 %s %ld %ld\n", pthread_self(), path, offset, size);
         ret = clic_write_block(buf, block, ioff, size);
-	//if (logger) fprintf(logger, "write3 %s %ld %ld -> %d\n", path, offset, size, ret);
+	if (logger) fprintf(logger, "%lx write3 %s %ld %ld -> %d\n", pthread_self(), path, offset, size, ret);
     } else {
 	size_t wrote = 0;
 	do
 	{
-	  //if (logger) fprintf(logger, "write4 %s %ld %ld\n", path, offset, size);
+	  if (logger) fprintf(logger, "%lx write4 %s %ld %ld %lx\n", pthread_self(), path, offset, size, pthread_self());
 	    size_t diff = clic_write_block(buf, block, ioff, size > pagesize ? pagesize : size);
-	    //if (logger) fprintf(logger, "write5 %s %ld %ld -> %ld\n", path, offset, size, diff);
+	    if (logger) fprintf(logger, "%lx write5 %s %ld %ld -> %ld\n", pthread_self(), path, offset, size, diff);
 	    ioff = 0;
 	    size -= diff;
 	    buf += diff;
@@ -556,7 +555,7 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
 
 	ret = wrote;
     }
-    //if (logger) fprintf(logger, "write %s %ld %ld -> %d\n", path, offset, size, ret);
+    if (logger) fprintf(logger, "%lx writeD %s %ld %ld -> %d\n", pthread_self(), path, offset, size, ret);
     return ret;
 }
 
@@ -888,6 +887,7 @@ int main(int argc, char *argv[])
     if (cowfilefd >= 0) close(cowfilefd);
     
     if (logger) fclose(logger);
+    logger=0;
 
     while (coms_sort_by_use_first)
 	clic_free_com(coms_sort_by_use_first);
