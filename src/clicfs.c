@@ -32,7 +32,7 @@
 #include <sys/time.h>
 #include <sys/mman.h>
 
-#define DEBUG 1
+//#define DEBUG 1
 
 FILE *logger = 0;
 
