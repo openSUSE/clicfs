@@ -34,14 +34,19 @@ int main(int argc, char *argv[])
       return 1;
     }
     const char *packfilename = argv[1];
-    
+
     if (clicfs_read_pack(packfilename))
       return 1;
 
+    FILE *outfile = fopen(thefile, "w");
+
+    if (!outfile) {
+        perror("Error while opening");
+        return 1;
+    }
+
     inbuf = malloc(blocksize_large*pagesize + 300);
     outbuf = malloc(blocksize_large*pagesize);
-
-    FILE *outfile = fopen(thefile, "w");
 
     size_t delta = num_pages / 100;
 
@@ -81,13 +86,16 @@ int main(int argc, char *argv[])
 	    }
 
 	    if (fwrite(outbuf + pagesize * off, 1, pagesize, outfile) != pagesize) {
-		perror("write");
-		break;
+		perror("Error while writing the file");
+		return 1;
 	    }
 	}
     }
 
-    fclose(outfile);
+    if (fclose(outfile)) {
+        perror("Error while closing the file");
+        return 1;
+    }
 
     return 0;
 }
