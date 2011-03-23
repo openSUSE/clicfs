@@ -692,6 +692,9 @@ static void* clic_init(struct fuse_conn_info *conn)
 {
     // avoid random reads or our profiling will be destroyed
     conn->max_readahead = 0;
+#ifdef FUSE_CAP_BIG_WRITES
+    conn->want = FUSE_CAP_BIG_WRITES;
+#endif
     clic_sync_tid = 0;
 
     pthread_create(&clic_sync_tid, NULL, clic_sync_thread, 0);
@@ -827,7 +830,6 @@ int main(int argc, char *argv[])
 
     // not sure why but multiple threads make it slower
     //fuse_opt_add_arg(&args, "-s");
-    fuse_opt_add_arg(&args, "-obig_writes");
 
     if (!packfilename) {
 	fprintf(stderr, "usage: [-m <mb>] [-l <logfile|->] [-c <cowfile>] <packfile> <mntpoint>\n");
