@@ -404,24 +404,30 @@ static const unsigned char *clic_uncompress(uint32_t part)
     return com->out_buffer;
 }
 
-static void clic_log_access(size_t block)
+static void clic_log_access(size_t block, size_t part)
 {
     if (!logger) return;
 
+#if 0
     static size_t firstblock = 0;
     static ssize_t lastblock = -1;
+#endif
 
+    fprintf(logger, "access %ld+8 (part %ld)\n", (long)block*8, part);
+
+#if 0
     if (lastblock >= 0 && block != (size_t)(lastblock + 1))
     {
-	fprintf(logger, "access %ld+%ld\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8);
+	fprintf(logger, "access %ld+%ld (part %ld)\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8, part);
 	firstblock = block;
     }
     lastblock = block;
     if (block > firstblock + 30) 
     {
-	fprintf(logger, "access %ld+%ld\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8);
+	fprintf(logger, "access %ld+%ld (part %ld)\n", (long)firstblock*8, (long)(lastblock-firstblock+1)*8, part);
 	firstblock = block;
     }
+#endif
 }
 
 static ssize_t clic_read_block(char *buf, size_t block);
@@ -579,8 +585,6 @@ static ssize_t clic_read_block(char *buf, size_t block)
     assert(PTR_CLASS(ptr) == CLASS_RO); // in read only part
     assert(block < num_pages);
 
-    clic_log_access(block);
-
     off_t mapped_block = clic_map_block(block);
     
     off_t part, off;
@@ -588,6 +592,7 @@ static ssize_t clic_read_block(char *buf, size_t block)
 
     assert(part < parts);
 
+    clic_log_access(block, part);
     //if (part >= largeparts && logger)  { fprintf(logger, "big access %ld+8\n", block*8); }
 
     const unsigned char *partbuf = clic_uncompress(part);
