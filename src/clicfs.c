@@ -27,6 +27,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <assert.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <sys/time.h>
@@ -61,6 +62,21 @@ static int clic_write_cow();
 pthread_mutex_t cowfile_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cowfile_mutex_writer = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t coms_by_part_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int detachall = 0;
+
+void detach_handler(int x)
+{
+  (void)x;
+  clic_write_cow();
+  close(cowfilefd);
+  cowfilefd = -1;
+  cowfilename = 0;
+
+  close(packfilefd);
+  packfilefd = -1;
+  detachall = 1;
+}
 
 static int clic_write_cow()
 {
@@ -880,6 +896,9 @@ int main(int argc, char *argv[])
     coms_by_part = malloc(sizeof(struct buffer_combo*)*MAX_COMS_SIZE);
     assert(coms_by_part);
     gettimeofday(&start, 0);
+
+    signal(SIGUSR1, detach_handler);
+
     /* MAIN LOOP */
     int ret = fuse_main(args.argc, args.argv, &clic_oper, NULL);
     clic_write_cow(); // ignored
