@@ -32,6 +32,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <sys/mman.h>
+#include <sys/sysinfo.h>
 
 //#define DEBUG 1
 
@@ -41,8 +42,8 @@ static size_t detached_allocated = 0;
 static size_t sparse_memory = 0;
 static char *cowfilename = 0;
 static off_t memory_used = 0;
-static time_t last_sync = 0;
-static time_t last_write = 0;
+static long last_sync = 0;
+static long last_write = 0;
 
 static struct timeval start;
 
@@ -58,6 +59,8 @@ static uint32_t clic_find_next_cow()
 
 static int clic_detach(size_t block);
 static int clic_write_cow();
+
+static long get_uptime();
 
 pthread_mutex_t cowfile_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cowfile_mutex_writer = PTHREAD_MUTEX_INITIALIZER;
@@ -76,6 +79,13 @@ void detach_handler(int x)
   close(packfilefd);
   packfilefd = -1;
   detachall = 1;
+}
+
+long get_uptime()
+{
+  struct sysinfo info;
+  sysinfo(&info);
+  return info.uptime;
 }
 
 static int clic_write_cow()
@@ -122,7 +132,7 @@ static int clic_write_cow()
     }
 
     fdatasync(cowfilefd);
-    last_sync = time(0);
+    last_sync = get_uptime();
     // not true for threads assert(!detached_allocated);
 
 exit:
@@ -550,7 +560,7 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
 
     assert(ioff == 0 || ioff + size <= pagesize);
 
-    last_write = time(0);
+    last_write = get_uptime(0);
 
     int ret = 0;
 
