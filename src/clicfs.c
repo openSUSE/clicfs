@@ -205,7 +205,7 @@ struct buffer_combo {
     off_t out_buffer_size;
     int mmapped;
     uint32_t part;
-    time_t last_used;
+    long last_used;
     struct buffer_combo *next_by_use;
     struct buffer_combo *prev_by_use;
 };
@@ -349,7 +349,7 @@ static void clic_free_com(struct buffer_combo *com)
 static const unsigned char *clic_uncompress(uint32_t part)
 {
     //if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
-    time_t now = time(0);
+    long now = get_uptime();
 
     pthread_mutex_lock(&coms_by_part_mutex);
 
@@ -560,7 +560,7 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
 
     assert(ioff == 0 || ioff + size <= pagesize);
 
-    last_write = get_uptime(0);
+    last_write = get_uptime();
 
     int ret = 0;
 
