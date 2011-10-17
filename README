@@ -2,6 +2,7 @@ This is not really worth the read (yet).
 
 COWFILE FORMAT:
   9 bytes: CLICCOW%02d
+  4 bytes: isready flag
   8 bytes: file size (including sparse)
   
   num_pages*:

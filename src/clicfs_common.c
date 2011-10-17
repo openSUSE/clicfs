@@ -25,6 +25,7 @@
 #include <lzma.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -99,12 +100,18 @@ int clicfs_read_cow(const char *cowfilename)
     }
 
     head[9] = 0;
-    sprintf(expected, "CLICCOW%02d", DOENER_MAGIC);
+    sprintf(expected, "CLICCOW%02d", DOENER_COW_MAGIC);
     if (strcmp(head,expected)) {
 	fprintf(stderr, "wrong magic: %s vs %s\n", head, expected);
 	return 1;
     }
     
+    uint32_t isready = clic_readindex_fd(cowfilefd);
+    if (!isready) {
+      fprintf(stderr, "Inconsistent COW file\n");
+      return 1;
+    }
+
     thefilesize = clic_readindex_fd64(cowfilefd);
     uint32_t newpages = thefilesize / pagesize;
     blockmap = realloc(blockmap, sizeof(unsigned char*)*newpages);
@@ -148,16 +155,19 @@ int clicfs_read_pack(const char *packfilename)
     head[6] = 0;
     sprintf(expected, "CLIC%02d", DOENER_MAGIC);
     if (strcmp(head,expected)) {
+        errno = 0;
 	fprintf(stderr, "wrong magic: %s vs %s\n", head, expected);
 	return 1;
     }
 
     uint32_t stringlen = clic_readindex_fd(packfilefd);
     if (stringlen == 0 || stringlen >= PATH_MAX) {
+        errno = ENAMETOOLONG;
 	fprintf(stderr, "abnormal len %lx\n", (long)stringlen); 
         return 1;
     }
     if (read(packfilefd, thefile, stringlen) != stringlen) {
+        errno = EIO;
 	fprintf(stderr, "short read %ld\n", (long)stringlen);
 	return 1;
     }
@@ -189,17 +199,20 @@ int clicfs_read_pack(const char *packfilename)
 		parts = 0;
 	if (!sizes[i]) {
 		fprintf(stderr, "unreasonable size 0 for part %d\n", i);
+		errno = EINVAL;
 		return 1;
         }
 	if (read(packfilefd, (char*)(offs + i), sizeof(uint64_t)) != sizeof(uint64_t))
 		parts = 0;
 	if (i > 0 && offs[i] <= offs[i-1]) {
 	  fprintf(stderr, "the offset for i is not larger than i-1: %ld\n", (long)i);
+	  errno = EINVAL;
 	  return 1;
 	}
     }
     if (parts == 0) {
         fprintf(stderr, "unreasonable part number 0\n");
+	errno = EINVAL;
 	return 1;
     }
     lseek(packfilefd, (oparts-parts)*sizeof(uint64_t)*2, SEEK_CUR);
@@ -210,6 +223,7 @@ int clicfs_read_pack(const char *packfilename)
     strm = tmp;
     lzma_ret ret = lzma_auto_decoder(&strm, lzma_easy_decoder_memusage(preset), flags);
     if (ret != LZMA_OK) {
+      errno = EIO;
       return 1;
     }
 

@@ -29,6 +29,10 @@ extern int cowfilefd;
 // magic 2 added large parts
 #define DOENER_MAGIC 2
 
+// magic 3 split from DOENER_MAGIC
+//         and introduced consistent flag
+#define DOENER_COW_MAGIC 3
+
 #define PTR_CLASS(x) ((long)x & 0x3)
 
 enum { CLASS_MEMORY = 0,

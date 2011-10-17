@@ -815,8 +815,10 @@ static int init_cow()
 	thefilesize += pagesize;
     bigfilesize += sparse_memory * 1024 * 1024;
   
-    assert( DOENER_MAGIC < 100 );
-    int index_len = fprintf(cow, "CLICCOW%02d", DOENER_MAGIC );
+    assert( DOENER_COW_MAGIC < 100 );
+    int index_len = fprintf(cow, "CLICCOW%02d", DOENER_COW_MAGIC );
+    uint32_t isready = 1;
+    index_len += fwrite(&isready, 1, sizeof(uint32_t), cow);
     index_len += fwrite((char*)&bigfilesize, 1, sizeof(uint64_t), cow);
 
     char zeros[sizeof(uint32_t)];
@@ -866,7 +868,7 @@ int main(int argc, char *argv[])
     }
 
     if (clicfs_read_pack(packfilename)) {
-	perror("read_pack");
+        if (errno) perror("read_pack");
 	return 1;
     }
 
