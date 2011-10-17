@@ -348,7 +348,7 @@ static void clic_free_com(struct buffer_combo *com)
 
 static const unsigned char *clic_uncompress(uint32_t part)
 {
-    //if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
+    if (logger) fprintf(logger, "clic_uncompress %d %d\n", part, parts);
     long now = get_uptime();
 
     pthread_mutex_lock(&coms_by_part_mutex);
@@ -371,6 +371,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
 	com->last_used = now;
 	clic_remove_com_from_use(com);
 	clic_append_by_use(com);
+        if (logger) fprintf(logger, "unlock fast\n");
 	pthread_mutex_unlock(&coms_by_part_mutex);
 	return buf;
     }
@@ -407,6 +408,7 @@ static const unsigned char *clic_uncompress(uint32_t part)
 
     clic_insert_com(com, res);
 
+    if (logger) fprintf(logger, "unlock slow\n");
     pthread_mutex_unlock(&coms_by_part_mutex);
     unsigned char *inbuffer = malloc(sizes[part]);
     assert(inbuffer);
@@ -524,7 +526,7 @@ exit:
 
 static size_t clic_write_block(const char *buf, off_t block, off_t ioff, size_t size)
 {
-    //if (logger) fprintf(logger, "clic_write_block %ld\n", detached_allocated);
+  if (logger) fprintf(logger, "clic_write_block %ld block:%ld ioff:%ld size:%ld\n", detached_allocated, block, ioff, size);
     if (clic_detach(block)) {
       if (logger) fprintf(logger, "clic_detach FAILED\n");
       return -ENOSPC;
@@ -544,6 +546,9 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
 
+    if (logger) fprintf(logger, "clic_write offset %ld - size %ld (%ld)\n", offset, size, thefilesize);
+
+
     if (offset >= (off_t)thefilesize) {
         return 0;
     }
@@ -558,19 +563,20 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     off_t block = offset / pagesize;
     off_t ioff = offset - block * pagesize;
 
-    assert(ioff == 0 || ioff + size <= pagesize);
-
     last_write = get_uptime();
 
-    int ret = 0;
+    size_t ret = 0;
 
-    if (size <= pagesize) {
-        ret = clic_write_block(buf, block, ioff, size);
+    if (ioff + size <= pagesize) {
+      ret = clic_write_block(buf, block, ioff, size);
     } else {
 	size_t wrote = 0;
 	do
 	{
-	    size_t diff = clic_write_block(buf, block, ioff, size > pagesize ? pagesize : size);
+	    size_t diff = size > pagesize ? pagesize : size;
+ 	    if (ioff + diff > pagesize)
+	         diff = pagesize - ioff;
+	    diff = clic_write_block(buf, block, ioff, diff);
 	    ioff = 0;
 	    size -= diff;
 	    buf += diff;
