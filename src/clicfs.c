@@ -100,7 +100,12 @@ static int clic_write_cow()
     
     pthread_mutex_lock(&cowfile_mutex);
 
-    uint32_t i;
+    uint32_t i = 0;
+    // before we start, we reset the isready flag
+    assert(cow_index_isready > 0);
+    pwrite(cowfilefd, &i, sizeof(uint32_t), cow_index_isready);
+    fdatasync(cowfilefd);
+
     for (i = 0; i < num_pages; ++i)
     {
 	long ptr = (long)blockmap[i];
@@ -131,7 +136,14 @@ static int clic_write_cow()
 	}
     }
 
+    // now sync the pages
     fdatasync(cowfilefd);
+
+    i = 1;
+    // as final step, set the isready flag back to 1
+    pwrite(cowfilefd, &i, sizeof(uint32_t), cow_index_isready);
+    fdatasync(cowfilefd);
+
     last_sync = get_uptime();
     // not true for threads assert(!detached_allocated);
 
@@ -818,6 +830,7 @@ static int init_cow()
     assert( DOENER_COW_MAGIC < 100 );
     int index_len = fprintf(cow, "CLICCOW%02d", DOENER_COW_MAGIC );
     uint32_t isready = 1;
+    cow_index_isready = index_len;
     index_len += fwrite(&isready, 1, sizeof(uint32_t), cow);
     index_len += fwrite((char*)&bigfilesize, 1, sizeof(uint64_t), cow);
 

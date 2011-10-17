@@ -61,6 +61,8 @@ extern uint32_t cow_pages;
 extern off_t cow_index_start;
 // the offset in the cow file where the pages start
 extern off_t cow_pages_start;
+// the offset in the cow file for the isready flag
+extern off_t cow_index_isready;
 // support temporary changes on ro medium
 extern int cowfile_ro;
 

@@ -54,6 +54,7 @@ off_t cow_pages_start = 0;
 uint32_t *cows = 0;
 unsigned int cows_index = 0;
 int cowfile_ro = 0;
+off_t cow_index_isready = 0;
 
 static lzma_stream strm;
 static pthread_mutex_t lzma_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -106,6 +107,7 @@ int clicfs_read_cow(const char *cowfilename)
 	return 1;
     }
     
+    cow_index_isready = strlen(expected);
     uint32_t isready = clic_readindex_fd(cowfilefd);
     if (!isready) {
       fprintf(stderr, "Inconsistent COW file\n");
