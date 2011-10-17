@@ -16,6 +16,8 @@
    02110-1301, USA
 */
 
+#include "clicfs.h"
+
 int main(int argc, char *argv[])
 {
   int ret = clicfs_read_cow(argv[1]);

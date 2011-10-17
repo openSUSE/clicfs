@@ -1,5 +1,5 @@
 /* This file is part of Clic FS
-   Copyright (C) 2009 Stephan Kulow (coolo@suse.de)
+   Copyright (C) 2009,2011 Stephan Kulow (coolo@suse.de)
 
    Clicfs is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public
@@ -100,21 +100,27 @@ int clicfs_read_cow(const char *cowfilename)
 	return 1;
     }
 
-    head[9] = 0;
+    cow_index_start = 9;
+    head[cow_index_start] = 0;
     sprintf(expected, "CLICCOW%02d", DOENER_COW_MAGIC);
     if (strcmp(head,expected)) {
 	fprintf(stderr, "wrong magic: %s vs %s\n", head, expected);
 	return 1;
     }
     
-    cow_index_isready = strlen(expected);
-    uint32_t isready = clic_readindex_fd(cowfilefd);
-    if (!isready) {
+    cow_index_isready = cow_index_start;
+    cow_index_start++;
+    char isready = 0;
+    read(cowfilefd, &isready, 1);
+    if (isready != 1) {
       fprintf(stderr, "Inconsistent COW file\n");
       return 1;
     }
 
+    cow_index_start += sizeof(uint64_t);
     thefilesize = clic_readindex_fd64(cowfilefd);
+    
+    printf("filesize %lx\n", thefilesize);
     uint32_t newpages = thefilesize / pagesize;
     blockmap = realloc(blockmap, sizeof(unsigned char*)*newpages);
     uint32_t i;
@@ -132,8 +138,7 @@ int clicfs_read_cow(const char *cowfilename)
     }
     cows = malloc(sizeof(uint32_t) * CLICFS_COW_COUNT);
     cows_index = 0;
-    
-    cow_index_start = 9 + sizeof(uint64_t);
+
     cow_pages_start = cow_index_start + num_pages * sizeof(uint32_t);
     // we do not round up but down here as cow pages start with 1
     cow_pages_start = ( cow_pages_start / pagesize + 0) * pagesize;
