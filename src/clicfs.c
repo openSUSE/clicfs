@@ -454,7 +454,7 @@ static void clic_log_access(size_t block, size_t part)
     static ssize_t lastblock = -1;
 #endif
 
-    fprintf(logger, "access %ld+8 (part %ld)\n", (long)block*8, part);
+    fprintf(logger, "access %ld+8 (part %ld)\n", (long)block*8, (long)part);
 
 #if 0
     if (lastblock >= 0 && block != (size_t)(lastblock + 1))
@@ -539,7 +539,10 @@ exit:
 
 static size_t clic_write_block(const char *buf, off_t block, off_t ioff, size_t size)
 {
-  if (logger) fprintf(logger, "clic_write_block %ld block:%ld ioff:%ld size:%ld\n", detached_allocated, block, ioff, size);
+  if (!size) return 0;
+
+  if (logger) fprintf(logger, "clic_write_block %lld block:%lld ioff:%lld size:%lld\n", 
+                      (long long)detached_allocated, (long long)block, (long long)ioff, (long long)size);
     if (clic_detach(block)) {
       if (logger) fprintf(logger, "clic_detach FAILED\n");
       return -ENOSPC;
@@ -559,7 +562,7 @@ static int clic_write(const char *path, const char *buf, size_t size, off_t offs
     if(path[0] == '/' && strcmp(path + 1, thefile) != 0)
 	return -ENOENT;
 
-    if (logger) fprintf(logger, "clic_write offset %ld - size %ld (%ld)\n", offset, size, thefilesize);
+    if (logger) fprintf(logger, "clic_write offset %lld - size %lld (%lld)\n", (long long)offset, (long long)size, (long long)thefilesize);
 
 
     if (offset >= (off_t)thefilesize) {
