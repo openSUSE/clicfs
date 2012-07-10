@@ -38,8 +38,8 @@
 
 FILE *logger = 0;
 
-static size_t detached_allocated = 0;
-static size_t sparse_memory = 0;
+static uint64_t detached_allocated = 0;
+static uint64_t sparse_memory = 0;
 static char *cowfilename = 0;
 static off_t memory_used = 0;
 static long last_sync = 0;
