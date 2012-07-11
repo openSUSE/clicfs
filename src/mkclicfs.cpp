@@ -624,6 +624,16 @@ int main(int argc, char **argv)
         }
     }
     // the remaining array parts (oparts-parts) stay sparse
+    
+    // now add some padding (bnc#733021)
+    fseeko(out, 0, SEEK_END);
+    off_t filesize = ftello(out);
+    off_t paddedfilesize = (filesize / 4096) * 4096;
+    if (filesize != paddedfilesize) {
+        char buffer[4096];
+        memset(buffer, 0, 4096);
+        fwrite(buffer, paddedfilesize + 4096 - filesize, 1, out);
+    }
 
     fclose(out);
     close( infd );
